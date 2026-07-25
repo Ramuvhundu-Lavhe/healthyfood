@@ -824,22 +824,52 @@ No preamble.`;
   const dislikedLower = new Set(disliked.map(d => d.toLowerCase()));
   const allergiesLower = (prefs.allergies || []).map(a => String(a).toLowerCase()).filter(Boolean);
 
+  // Gemini sometimes returns missing_items as bare strings ("salt", "flour")
+  // instead of { name, retailer, is_healthyfood } objects. Normalize both.
+  const normalizeMissing = (raw) => {
+    if (!Array.isArray(raw)) return [];
+    return raw.map(m => {
+      if (typeof m === 'string') return { name: m, retailer: 'Any grocer', is_healthyfood: false };
+      const name = m?.name || m?.item || '';
+      if (!name) return null;
+      return {
+        name: String(name),
+        retailer: m?.retailer || 'Any grocer',
+        is_healthyfood: Boolean(m?.is_healthyfood),
+      };
+    }).filter(Boolean);
+  };
+  const normalizeIngredients = (raw) => {
+    if (!Array.isArray(raw)) return [];
+    return raw.map(i => {
+      if (typeof i === 'string') return { name: i, amount: '' };
+      return {
+        name: String(i?.name || ''),
+        amount: String(i?.amount || ''),
+        ...(i?.alternative ? { alternative: String(i.alternative) } : {}),
+      };
+    }).filter(i => i.name);
+  };
+
   const recipes = (out.recipes || []).map(r => {
-    const allergenWarnings = computeAllergenWarnings(r, allergiesLower);
+    const ingredients = normalizeIngredients(r.ingredients);
+    const missing_items = normalizeMissing(r.missing_items);
+    const allergenWarnings = computeAllergenWarnings({ ...r, ingredients, missing_items }, allergiesLower);
     let processed = {
       ...r,
-      photo: photoForRecipe(r.name, r.ingredients),
+      ingredients,
+      missing_items,
+      photo: photoForRecipe(r.name, ingredients),
       allergen_warnings: allergenWarnings,
       allergy_safe: allergenWarnings.length === 0,
     };
-    // In empty-pantry mode, guarantee every ingredient is also a shopping-list
-    // item even if Gemini forgot. The user needs to know what to buy.
+    // Empty pantry → every ingredient is also a shopping-list item.
     if (isEmptyPantry) {
-      const existingMissing = new Set((processed.missing_items || []).map(m => String(m.name || '').toLowerCase()));
-      const ingredientsAsMissing = (processed.ingredients || [])
-        .filter(ing => !existingMissing.has(String(ing.name || '').toLowerCase()))
+      const existingMissing = new Set(processed.missing_items.map(m => m.name.toLowerCase()));
+      const ingredientsAsMissing = ingredients
+        .filter(ing => !existingMissing.has(ing.name.toLowerCase()))
         .map(ing => ({ name: ing.name, retailer: 'Any grocer', is_healthyfood: false }));
-      processed.missing_items = [...(processed.missing_items || []), ...ingredientsAsMissing];
+      processed.missing_items = [...processed.missing_items, ...ingredientsAsMissing];
       processed.all_in_pantry = false;
     }
     return processed;
