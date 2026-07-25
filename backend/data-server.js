@@ -1309,6 +1309,7 @@ function fallbackRecipes(cid, query = {}) {
 
   // Pick which templates to build based on the search
   const templateOrder = pickTemplates(userSearch);
+  const allergiesLower = (prefs.allergies || []).map(a => String(a).toLowerCase()).filter(Boolean);
 
   const recipes = templateOrder
     .map(tn => {
@@ -1316,7 +1317,13 @@ function fallbackRecipes(cid, query = {}) {
       catch (_) { return null; }
     })
     .filter(Boolean)
-    .filter(r => dietCompatible(r, prefs.diet));
+    .filter(r => dietCompatible(r, prefs.diet))
+    // Every recipe (Gemini OR fallback) carries the allergen_warnings field so
+    // the frontend can render red warning banners consistently.
+    .map(r => {
+      const warnings = computeAllergenWarnings(r, allergiesLower);
+      return { ...r, allergen_warnings: warnings, allergy_safe: warnings.length === 0 };
+    });
 
   const wantedMax = userSearch ? 8 : 6;
   return { recipes: recipes.slice(0, wantedMax) };
