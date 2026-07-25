@@ -452,6 +452,25 @@ export const removePantryItem = async (customerId: string, name: string): Promis
   return response.data.pantry;
 };
 
+export const addToShoppingList = async (
+  customerId: string,
+  items: { name: string; retailer?: string; is_healthyfood?: boolean; source_recipe?: string }[]
+): Promise<{ ok: boolean; added: number; list?: ShoppingListResponse }> => {
+  try {
+    const response = await axios.post(toApiUrl(`/shopping-list/${customerId}/add`), { items });
+    return response.data;
+  } catch (e: any) {
+    return { ok: false, added: 0 };
+  }
+};
+
+export const removeShoppingItem = async (customerId: string, name: string): Promise<ShoppingListResponse | null> => {
+  try {
+    const response = await axios.delete(toApiUrl(`/shopping-list/${customerId}/item/${encodeURIComponent(name)}`));
+    return response.data.list;
+  } catch { return null; }
+};
+
 export const getShoppingList = async (customerId: string): Promise<ShoppingListResponse> => {
   try {
     const response = await axios.get(`${API_URL}/shopping-list/${customerId}`);

@@ -17,6 +17,7 @@ const DEFAULT_STATE = {
   cooked: {},         // customer_id -> [{ recipe_name, ingredients, cooked_at }]
   reviews: {},        // customer_id -> { recipe_name -> { rating: 1|-1, tags, reviewed_at } }
   pantry_added: {},   // customer_id -> [{ name, category, added_at }]
+  shopping_added: {}, // customer_id -> [{ name, retailer, is_healthyfood, source_recipe, added_at }]
   saved: {},          // customer_id -> [{ ...recipe, saved_at }] (per-user isolated)
   next_customer_num: 100,
 };
@@ -139,6 +140,37 @@ export const db = {
     if (state.pantry_added[cid].length < before) { save(); return true; }
     return false;
   },
+
+  // Shopping list — user-added items from Missing-items modal etc.
+  addShoppingItems: (cid, items) => {
+    if (!state.shopping_added[cid]) state.shopping_added[cid] = [];
+    const existing = new Set(state.shopping_added[cid].map(i => String(i.name).toLowerCase().trim()));
+    let added = 0;
+    for (const it of items) {
+      const key = String(it.name || '').toLowerCase().trim();
+      if (!key || existing.has(key)) continue;
+      state.shopping_added[cid].push({
+        name: String(it.name),
+        retailer: it.retailer || 'Any grocer',
+        is_healthyfood: Boolean(it.is_healthyfood),
+        source_recipe: it.source_recipe || null,
+        added_at: Date.now(),
+      });
+      existing.add(key);
+      added++;
+    }
+    if (added > 0) save();
+    return added;
+  },
+  removeShoppingItem: (cid, name) => {
+    if (!state.shopping_added[cid]) return false;
+    const key = String(name).toLowerCase().trim();
+    const before = state.shopping_added[cid].length;
+    state.shopping_added[cid] = state.shopping_added[cid].filter(i => i.name.toLowerCase().trim() !== key);
+    if (state.shopping_added[cid].length < before) { save(); return true; }
+    return false;
+  },
+  getShoppingAdditions: (cid) => state.shopping_added[cid] || [],
 
   // Saved recipes — per customer, isolated across users
   addSaved: (cid, recipe) => {

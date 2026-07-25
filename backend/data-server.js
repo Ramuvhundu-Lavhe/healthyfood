@@ -1673,6 +1673,21 @@ function computeShoppingList(cid) {
     items.push(item);
   };
 
+  // Priority 0 — user-added items (e.g. from the "Missing items" modal).
+  // These render at the top with a distinct reason so the user recognises them.
+  for (const add of db.getShoppingAdditions(cid)) {
+    const cat = categoryFor(add.name);
+    push({
+      name: add.name,
+      category: cat,
+      priority: 'high',
+      reason: add.source_recipe ? `Added for "${add.source_recipe}"` : 'Added by you',
+      estimated_cost: estimateCost(add.name, cat),
+      is_healthyfood: !!add.is_healthyfood,
+      user_added: true,
+    });
+  }
+
   // Priority 1 — expiring perishables: suggest fresh replacements
   const expiring = pantry.filter(i => i.days_until_expiry <= 3 && i.is_healthy);
   for (const ex of expiring) {
@@ -1760,6 +1775,25 @@ function computeShoppingList(cid) {
 app.get('/shopping-list/:customerId', (req, res) => {
   try { res.json(computeShoppingList(resolveCid(req))); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Persist items added from the "Missing items" flow on the Recipes screen.
+// Payload: { items: [{name, retailer, is_healthyfood, source_recipe}] }
+// Returns the freshly-computed shopping list so the frontend can navigate
+// straight to Shop without a second fetch.
+app.post('/shopping-list/:customerId/add', (req, res) => {
+  const cid = resolveCid(req);
+  const raw = Array.isArray(req.body?.items) ? req.body.items : [];
+  const items = raw.map(i => (typeof i === 'string' ? { name: i } : i)).filter(i => i && i.name);
+  if (!items.length) return res.status(400).json({ error: 'items[] required' });
+  const added = db.addShoppingItems(cid, items);
+  res.json({ ok: true, added, list: computeShoppingList(cid) });
+});
+
+app.delete('/shopping-list/:customerId/item/:name', (req, res) => {
+  const cid = resolveCid(req);
+  const removed = db.removeShoppingItem(cid, decodeURIComponent(req.params.name));
+  res.json({ ok: true, removed, list: computeShoppingList(cid) });
 });
 
 // ───────────────────────── Boot ─────────────────────────

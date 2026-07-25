@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { getRecipes, getPantry, getSavedRecipes, saveRecipe, unsaveRecipe, recordCooked } from '../api';
+import { getRecipes, getPantry, getSavedRecipes, saveRecipe, unsaveRecipe, recordCooked, addToShoppingList } from '../api';
 import { Recipe } from '../types';
 import { useProfile } from '../context/ProfileContext';
 import StyledDropdown, { DropdownOption } from '../components/StyledDropdown';
@@ -180,9 +180,31 @@ const RecipesScreen: React.FC = () => {
     }
   };
 
-  const handleAddToList = () => {
-    setSelectedMissing(null);
-    addToast("Items added to shopping list");
+  const [addingToList, setAddingToList] = useState(false);
+
+  const handleAddToList = async () => {
+    if (!selectedMissing || !profile || addingToList) return;
+    const items = selectedMissing.missing_items.map(m => ({
+      name: m.name,
+      retailer: m.retailer,
+      is_healthyfood: m.is_healthyfood,
+      source_recipe: selectedMissing.name,
+    }));
+    if (!items.length) { setSelectedMissing(null); return; }
+    setAddingToList(true);
+    try {
+      const res = await addToShoppingList(profile.customer_id, items);
+      if (res.ok) {
+        addToast(res.added > 0
+          ? `${res.added} item${res.added === 1 ? '' : 's'} added to your shopping list`
+          : `All ${items.length} items were already on your list`);
+      } else {
+        addToast('Could not update shopping list — please try again');
+      }
+    } finally {
+      setAddingToList(false);
+      setSelectedMissing(null);
+    }
   };
 
   const handleAskAI = (recipeName: string) => {
@@ -513,26 +535,39 @@ const RecipesScreen: React.FC = () => {
         )}
       </div>
 
-      {/* Missing Items Modal */}
+      {/* Missing Items Modal — fixed positioning constrained to the app frame
+          so it always covers the viewport regardless of scroll position. */}
       {selectedMissing && (
-        <div className="absolute inset-0 z-50 flex items-end bg-[var(--navy-deep)] bg-opacity-60 backdrop-blur-sm">
-          <div className="bg-white w-full rounded-t-3xl p-6 shadow-2xl animate-slide-up">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-bold text-[var(--navy)]">Missing Items</h2>
-              <button onClick={() => setSelectedMissing(null)} className="p-2 bg-[var(--bg)] rounded-full text-[var(--ink-muted)] hover:text-[var(--ink)]">
+        <div
+          className="fixed inset-0 z-[70] flex items-end justify-center bg-[var(--navy-deep)] bg-opacity-60 backdrop-blur-sm"
+          onClick={() => setSelectedMissing(null)}
+        >
+          <div
+            className="bg-white w-full max-w-[480px] mx-auto rounded-t-3xl p-6 shadow-2xl animate-slide-up max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-start mb-4 flex-shrink-0">
+              <div className="min-w-0">
+                <h2 className="text-xl font-bold text-[var(--navy)]">Missing Items</h2>
+                <p className="text-xs text-[var(--ink-muted)] mt-0.5 truncate">For {selectedMissing.name}</p>
+              </div>
+              <button onClick={() => setSelectedMissing(null)} className="p-2 bg-[var(--bg)] rounded-full text-[var(--ink-muted)] hover:text-[var(--ink)] flex-shrink-0" aria-label="Close">
                 <X size={20} />
               </button>
             </div>
-            
-            <div className="space-y-4 mb-8">
+
+            <div className="flex-1 overflow-y-auto space-y-3 mb-4 -mx-1 px-1">
+              {selectedMissing.missing_items.length === 0 && (
+                <p className="text-sm text-[var(--ink-muted)] text-center py-6">Nothing missing — you have everything you need.</p>
+              )}
               {selectedMissing.missing_items.map((item, idx) => (
                 <div key={idx} className="flex justify-between items-center border-b border-[var(--line)] pb-3 last:border-0">
-                  <div>
+                  <div className="min-w-0">
                     <p className="font-bold text-[var(--ink)]">{item.name}</p>
                     <p className="text-xs text-[var(--ink-muted)] mt-0.5">Available at <span className="font-semibold">{item.retailer}</span></p>
                   </div>
                   {item.is_healthyfood && (
-                    <span className="bg-[#E8F3ED] text-[var(--healthy-green)] text-[10px] font-bold px-2.5 py-1 rounded-full border border-[var(--healthy-green)]">
+                    <span className="bg-[#E8F3ED] text-[var(--healthy-green)] text-[10px] font-bold px-2.5 py-1 rounded-full border border-[var(--healthy-green)] flex-shrink-0 ml-2">
                       HealthyFood
                     </span>
                   )}
@@ -540,11 +575,13 @@ const RecipesScreen: React.FC = () => {
               ))}
             </div>
 
-            <button 
+            <button
               onClick={handleAddToList}
-              className="w-full bg-[var(--healthy-green)] text-white font-bold py-3.5 rounded-xl flex items-center justify-center shadow-md"
+              disabled={addingToList || selectedMissing.missing_items.length === 0}
+              className="w-full bg-[var(--healthy-green)] text-white font-bold py-3.5 rounded-xl flex items-center justify-center shadow-md disabled:opacity-50 flex-shrink-0"
             >
-              <ShoppingBasket size={18} className="mr-2" /> Add to shopping list
+              <ShoppingBasket size={18} className="mr-2" />
+              {addingToList ? 'Adding…' : 'Add to shopping list'}
             </button>
           </div>
         </div>
