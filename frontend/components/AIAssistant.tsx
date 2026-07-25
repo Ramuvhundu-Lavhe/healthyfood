@@ -271,12 +271,14 @@ const AIAssistant: React.FC = () => {
         const data: any = await getRecipes(profile.customer_id, { search: userMsg.text });
         const recipes = (data?.recipes || []).slice(0, 2);
         let introText: string;
-        if (data?.empty_pantry) {
-          introText = "Your pantry is empty — add a few items to the Pantry tab and I'll build recipes from what you have.";
+        if (data?.empty_pantry && recipes.length) {
+          introText = `Your pantry is empty — here's what you could make for "${userMsg.text}". Every ingredient below is on your shopping list.`;
+        } else if (data?.empty_pantry) {
+          introText = "Your pantry is empty. Add a few items to the Pantry tab and I'll tailor recipes to what you have.";
         } else if (recipes.length) {
           introText = `Here's what I'd cook from your pantry for "${userMsg.text}":`;
         } else {
-          introText = "I couldn't build a recipe for that from your current pantry. Try adding more items or ask a broader question.";
+          introText = "I couldn't build a recipe for that. Try a simpler query or add more items to your pantry.";
         }
         setMessages(prev => [...prev, {
           id: (Date.now() + 1).toString(),

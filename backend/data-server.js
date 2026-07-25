@@ -738,11 +738,7 @@ async function generateRecipes(cid, query = {}) {
   const prefs = db.getPrefs(cid) || DB.prefs[cid] || defaultPrefs();
   const safePantry = pantry.filter(i => !i.allergen_conflict && !i.diet_conflict).map(i => i.name);
   const expiring = pantry.filter(i => i.days_until_expiry <= 3 && !i.allergen_conflict && !i.diet_conflict).map(i => i.name);
-
-  // Refuse to invent recipes for an empty pantry — recipes must be pantry-grounded.
-  if (safePantry.length === 0) {
-    throw Object.assign(new Error('empty pantry'), { code: 'EMPTY_PANTRY' });
-  }
+  const isEmptyPantry = safePantry.length === 0;
 
   // Learning signal: recent cooks + explicit reviews
   const cooked = db.getCooked(cid).slice(0, 8).map(c => c.recipe_name);
@@ -768,14 +764,27 @@ Disliked recipes (AVOID recipes similar to these): ${disliked.join(', ') || 'non
       }[String(prefs.diet).toLowerCase()] || 'anything the user cannot eat.') + ' If a pantry item violates this diet, exclude it and pick alternatives.'
     : '';
 
+  const emptyPantryBlock = isEmptyPantry ? `
+IMPORTANT — EMPTY PANTRY MODE:
+The user has NOTHING in their pantry. Suggest 3-4 popular, achievable STARTER meals
+they could buy for. For every recipe:
+  - list every single ingredient inside "missing_items" (not just extras) — this
+    becomes their shopping list to make the dish
+  - keep "ingredients" identical to what's in the recipe so the frontend can
+    still render the ingredient list
+  - set "all_in_pantry": false
+  - prefer common, affordable South African supermarket items
+` : '';
+
   const prompt = `You are the Discovery HealthyFood AI Agent & Recipe Search Assistant for South Africa.
-CRITICAL: You MUST construct recipes using the user's EXACT pantry inventory below:
+${isEmptyPantry ? '' : `CRITICAL: You MUST construct recipes using the user's EXACT pantry inventory below:
 User Pantry Items: ${safePantry.join(', ')}
-Expiring Soon (MUST prioritize using these): ${expiring.join(', ') || 'none'}
+Expiring Soon (MUST prioritize using these): ${expiring.join(', ') || 'none'}`}
 Household size: ${prefs.household_size}
 ${dietRule}
 Allergies to avoid completely (HARD RULE — never include or suggest these or foods that contain them): ${prefs.allergies.join(', ') || 'none'}
 Context: event=${query.event || 'none'}, goal=${query.goal || 'general'}, power=${query.power || 'on'}.
+${emptyPantryBlock}
 ${historyBlock}
 ${searchPrompt}
 
@@ -816,23 +825,35 @@ No preamble.`;
   const allergiesLower = (prefs.allergies || []).map(a => String(a).toLowerCase()).filter(Boolean);
 
   const recipes = (out.recipes || []).map(r => {
-    // Compute which of the user's allergens appear in this recipe
     const allergenWarnings = computeAllergenWarnings(r, allergiesLower);
-    return {
+    let processed = {
       ...r,
       photo: photoForRecipe(r.name, r.ingredients),
       allergen_warnings: allergenWarnings,
       allergy_safe: allergenWarnings.length === 0,
     };
+    // In empty-pantry mode, guarantee every ingredient is also a shopping-list
+    // item even if Gemini forgot. The user needs to know what to buy.
+    if (isEmptyPantry) {
+      const existingMissing = new Set((processed.missing_items || []).map(m => String(m.name || '').toLowerCase()));
+      const ingredientsAsMissing = (processed.ingredients || [])
+        .filter(ing => !existingMissing.has(String(ing.name || '').toLowerCase()))
+        .map(ing => ({ name: ing.name, retailer: 'Any grocer', is_healthyfood: false }));
+      processed.missing_items = [...(processed.missing_items || []), ...ingredientsAsMissing];
+      processed.all_in_pantry = false;
+    }
+    return processed;
   }).filter(r => {
-    // Diet remains a HARD filter (vegan users never see beef)
     if (!dietCompatible(r, prefs.diet)) return false;
-    // Skip explicitly disliked recipes
     if (dislikedLower.has(String(r.name).toLowerCase())) return false;
     return true;
   });
   if (!recipes.length) throw new Error('no safe recipes generated');
-  return { recipes };
+  return {
+    recipes,
+    empty_pantry: isEmptyPantry,
+    ...(isEmptyPantry ? { message: 'Your pantry is empty — every ingredient below is on the shopping list.' } : {}),
+  };
 }
 
 // Returns the list of user-allergen terms that appear in the recipe's ingredients / name / steps.
@@ -1473,8 +1494,7 @@ function fallbackRecipes(cid, query = {}) {
   const prefs = db.getPrefs(cid) || DB.prefs[cid] || defaultPrefs();
   const pantry = computePantry(cid).items.filter(i => !i.allergen_conflict && !i.diet_conflict);
   const names = pantry.map(i => i.name);
-  // Empty pantry → return nothing. Every recipe must come from what the user has.
-  if (names.length === 0) return { recipes: [], empty_pantry: true };
+  const isEmpty = names.length === 0;
   const has = (kw) => names.find(n => n.toLowerCase().includes(kw));
   const userSearch = String(query.search || query.q || '').trim().toLowerCase();
 
@@ -1516,15 +1536,27 @@ function fallbackRecipes(cid, query = {}) {
     })
     .filter(Boolean)
     .filter(r => dietCompatible(r, prefs.diet))
-    // Every recipe (Gemini OR fallback) carries the allergen_warnings field so
-    // the frontend can render red warning banners consistently.
     .map(r => {
       const warnings = computeAllergenWarnings(r, allergiesLower);
-      return { ...r, allergen_warnings: warnings, allergy_safe: warnings.length === 0 };
+      let processed = { ...r, allergen_warnings: warnings, allergy_safe: warnings.length === 0 };
+      // Empty pantry → every ingredient becomes a shopping-list item.
+      if (isEmpty) {
+        const existingMissing = new Set((processed.missing_items || []).map(m => String(m.name || '').toLowerCase()));
+        const ingredientsAsMissing = (processed.ingredients || [])
+          .filter(ing => !existingMissing.has(String(ing.name || '').toLowerCase()))
+          .map(ing => ({ name: ing.name, retailer: 'Any grocer', is_healthyfood: false }));
+        processed.missing_items = [...(processed.missing_items || []), ...ingredientsAsMissing];
+        processed.all_in_pantry = false;
+      }
+      return processed;
     });
 
-  const wantedMax = userSearch ? 8 : 6;
-  return { recipes: recipes.slice(0, wantedMax) };
+  const wantedMax = userSearch ? 8 : (isEmpty ? 4 : 6);
+  return {
+    recipes: recipes.slice(0, wantedMax),
+    empty_pantry: isEmpty,
+    ...(isEmpty ? { message: 'Your pantry is empty — every ingredient below is on the shopping list.' } : {}),
+  };
 }
 
 // Given the user's search, if it names an actual food (chicken / beef / lentil / etc.)

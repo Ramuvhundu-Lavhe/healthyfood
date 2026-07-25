@@ -353,12 +353,6 @@ const RecipesScreen: React.FC = () => {
                 <p className="text-sm mt-1">Tap the heart on any recipe to save it here.</p>
                 <button onClick={() => setViewingSaved(false)} className="text-[var(--teal)] font-bold mt-3 underline">Browse recipes</button>
               </>
-            ) : emptyPantry ? (
-              <>
-                <ShoppingBasket size={32} className="mx-auto text-[var(--line)] mb-2" />
-                <p className="font-bold text-[var(--ink)]">Your pantry is empty</p>
-                <p className="text-sm mt-1 max-w-xs mx-auto">Recipes are built from what you have. Add a few items to the Pantry tab first.</p>
-              </>
             ) : (
               <>
                 <p>No recipes found matching your prompt and filters.</p>
@@ -367,6 +361,24 @@ const RecipesScreen: React.FC = () => {
             )}
           </div>
         ) : (
+          <>
+            {/* Empty-pantry banner — recipes shown are starter shopping lists */}
+            {emptyPantry && !viewingSaved && (
+              <div className="discovery-card bg-gradient-to-br from-[#FFF8E6] to-white border-[var(--gold)] flex items-start">
+                <div className="bg-[var(--gold)] p-2 rounded-full mr-3 flex-shrink-0">
+                  <ShoppingBasket size={18} className="text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-[var(--navy)] text-sm">Your pantry is empty</p>
+                  <p className="text-xs text-[var(--ink-muted)] mt-0.5 leading-snug">
+                    Here are meals you could make. Every ingredient is on the shopping list — tap any recipe to see what to buy.
+                  </p>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+        {activeList.length > 0 && (
           Object.entries(groupedRecipes).map(([category, categoryRecipes]) => (
             <div key={category} className="space-y-4">
               <h2 className="text-lg font-bold text-[var(--navy)] border-b border-[var(--line)] pb-2 flex justify-between items-center">
