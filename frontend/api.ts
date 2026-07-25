@@ -1,7 +1,8 @@
 import axios from 'axios';
-import { Profile, PantryResponse, RecipeResponse, ProgressResponse, HeritageResponse, CommunityResponse, ShoppingListResponse, Preferences } from './types';
+import { Profile, PantryResponse, Recipe, RecipeResponse, ProgressResponse, HeritageResponse, CommunityResponse, ShoppingListResponse, Preferences } from './types';
 
-const API_URL = (import.meta as any).env?.VITE_API_URL || 'https://api.example.com';
+const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:5001';
+const toApiUrl = (path: string) => `${API_URL}${path.startsWith('/') ? '' : '/'}${path}`;
 
 // Attach auth token from localStorage to every request
 axios.interceptors.request.use((config) => {
@@ -232,7 +233,7 @@ const mockCommunity: CommunityResponse = {
 // --- API CALLS ---
 export const getProfile = async (customerId: string): Promise<Profile> => {
   try {
-    const response = await axios.get(`${API_URL}/profile/${customerId}`);
+    const response = await axios.get(toApiUrl(`/profile/${customerId}`));
     return response.data;
   } catch (error) {
     console.warn('Failed to fetch profile, using mock data');
@@ -242,7 +243,7 @@ export const getProfile = async (customerId: string): Promise<Profile> => {
 
 export const getPantry = async (customerId: string): Promise<PantryResponse> => {
   try {
-    const response = await axios.get(`${API_URL}/pantry/${customerId}`);
+    const response = await axios.get(toApiUrl(`/pantry/${customerId}`));
     return response.data;
   } catch (error) {
     console.warn('Failed to fetch pantry, using mock data');
@@ -252,7 +253,7 @@ export const getPantry = async (customerId: string): Promise<PantryResponse> => 
 
 export const getRecipes = async (customerId: string, params?: any): Promise<RecipeResponse> => {
   try {
-    const response = await axios.get(`${API_URL}/recipes/${customerId}`, { params });
+    const response = await axios.get(toApiUrl(`/recipes/${customerId}`), { params });
     return response.data;
   } catch (error) {
     console.warn('Failed to fetch recipes from server, using AI fallback generator');
@@ -316,7 +317,7 @@ export const getRecipes = async (customerId: string, params?: any): Promise<Reci
 
 export const getProgress = async (customerId: string): Promise<ProgressResponse> => {
   try {
-    const response = await axios.get(`${API_URL}/progress/${customerId}`);
+    const response = await axios.get(toApiUrl(`/progress/${customerId}`));
     return response.data;
   } catch (error) {
     console.warn('Failed to fetch progress, using mock data');
@@ -326,7 +327,7 @@ export const getProgress = async (customerId: string): Promise<ProgressResponse>
 
 export const getHeritage = async (): Promise<HeritageResponse> => {
   try {
-    const response = await axios.get(`${API_URL}/heritage/today`);
+    const response = await axios.get(toApiUrl('/heritage/today'));
     return response.data;
   } catch (error) {
     console.warn('Failed to fetch heritage, using mock data');
@@ -336,7 +337,7 @@ export const getHeritage = async (): Promise<HeritageResponse> => {
 
 export const getCommunity = async (customerId: string): Promise<CommunityResponse> => {
   try {
-    const response = await axios.get(`${API_URL}/community/${customerId}`);
+    const response = await axios.get(toApiUrl(`/community/${customerId}`));
     return response.data;
   } catch (error) {
     console.warn('Failed to fetch community, using mock data');
@@ -358,24 +359,24 @@ export const register = async (input: {
   name?: string;
   preferences?: Partial<Preferences>;
 }): Promise<AuthResponse> => {
-  const response = await axios.post(`${API_URL}/auth/register`, input);
+  const response = await axios.post(toApiUrl('/auth/register'), input);
   return response.data;
 };
 
 export const login = async (input: { username: string; password: string }): Promise<AuthResponse> => {
-  const response = await axios.post(`${API_URL}/auth/login`, input);
+  const response = await axios.post(toApiUrl('/auth/login'), input);
   return response.data;
 };
 
 export const getMe = async (): Promise<{ username: string; customer_id: string; name: string; preferences: Preferences }> => {
-  const response = await axios.get(`${API_URL}/auth/me`);
+  const response = await axios.get(toApiUrl('/auth/me'));
   return response.data;
 };
 
 // ─────────────── Saved recipes (per-user) ───────────────
 export const getSavedRecipes = async (customerId: string): Promise<{ items: Recipe[] }> => {
   try {
-    const response = await axios.get(`${API_URL}/saved/${customerId}`);
+    const response = await axios.get(toApiUrl(`/saved/${customerId}`));
     return response.data;
   } catch {
     return { items: [] };
@@ -383,35 +384,35 @@ export const getSavedRecipes = async (customerId: string): Promise<{ items: Reci
 };
 
 export const saveRecipe = async (customerId: string, recipe: Recipe): Promise<void> => {
-  try { await axios.post(`${API_URL}/saved/${customerId}`, { recipe }); }
+  try { await axios.post(toApiUrl(`/saved/${customerId}`), { recipe }); }
   catch (e) { console.warn('saveRecipe failed:', (e as Error).message); }
 };
 
 export const unsaveRecipe = async (customerId: string, name: string): Promise<void> => {
-  try { await axios.delete(`${API_URL}/saved/${customerId}/${encodeURIComponent(name)}`); }
+  try { await axios.delete(toApiUrl(`/saved/${customerId}/${encodeURIComponent(name)}`)); }
   catch (e) { console.warn('unsaveRecipe failed:', (e as Error).message); }
 };
 
 // ─────────────── Cooked + Reviews ───────────────
 export const recordCooked = async (customerId: string, recipe_name: string, ingredients?: string[]): Promise<void> => {
-  try { await axios.post(`${API_URL}/cooked/${customerId}`, { recipe_name, ingredients }); }
+  try { await axios.post(toApiUrl(`/cooked/${customerId}`), { recipe_name, ingredients }); }
   catch (e) { console.warn('recordCooked failed:', (e as Error).message); }
 };
 
 export const recordReview = async (customerId: string, recipe_name: string, rating: 1 | -1): Promise<void> => {
-  try { await axios.post(`${API_URL}/reviews/${customerId}`, { recipe_name, rating }); }
+  try { await axios.post(toApiUrl(`/reviews/${customerId}`), { recipe_name, rating }); }
   catch (e) { console.warn('recordReview failed:', (e as Error).message); }
 };
 
 // ─────────────── Pantry additions ───────────────
 export const addPantryItem = async (customerId: string, name: string, category?: string): Promise<PantryResponse> => {
-  const response = await axios.post(`${API_URL}/pantry/${customerId}/add`, { name, category });
+  const response = await axios.post(toApiUrl(`/pantry/${customerId}/add`), { name, category });
   return response.data;
 };
 
 export const categorizePantryItem = async (name: string): Promise<{ name: string; category: string }> => {
   try {
-    const response = await axios.post(`${API_URL}/pantry/categorize`, { name });
+    const response = await axios.post(toApiUrl('/pantry/categorize'), { name });
     return response.data;
   } catch {
     return { name, category: 'Fruit and vegetables' };
