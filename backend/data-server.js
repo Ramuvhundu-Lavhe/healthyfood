@@ -38,8 +38,16 @@ const GOOGLE_CLOUD_PROJECT = process.env.GOOGLE_CLOUD_PROJECT;
 const GOOGLE_CLOUD_LOCATION = process.env.GOOGLE_CLOUD_LOCATION || 'global';
 // gemini-2.5-flash was retired for new API keys — Google returned:
 //   "This model models/gemini-2.5-flash is no longer available to new users."
-// Defaulting to the moving 'latest' alias so we don't hit this again.
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest';
+// Defaulting to the moving 'latest' alias so we don't hit this again. Also
+// auto-correcting the retired name in case a stale .env on the deployed VM
+// still pins it — otherwise the code default is bypassed.
+const RETIRED_MODELS = new Set(['gemini-2.5-flash']);
+let GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest';
+if (RETIRED_MODELS.has(GEMINI_MODEL)) {
+  console.warn(`[startup] GEMINI_MODEL "${GEMINI_MODEL}" was retired by Google — falling back to gemini-flash-latest`);
+  GEMINI_MODEL = 'gemini-flash-latest';
+}
+console.log(`[startup] Gemini model: ${GEMINI_MODEL}`);
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const TX_FILE = process.env.TRANSACTIONS_FILE || path.join(__dirname, 'transactions.xlsx');
 
