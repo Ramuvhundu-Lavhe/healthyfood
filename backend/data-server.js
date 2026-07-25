@@ -1108,8 +1108,16 @@ app.post('/ai/chat', async (req, res) => {
     if (!reply) throw new Error('empty AI response');
     res.json({ reply });
   } catch (e) {
-    console.warn('[ai/chat] error:', e.message);
-    res.status(502).json({ error: 'AI request failed. Please try again.', code: 'AI_ERROR' });
+    // Log & surface the real reason so we can diagnose (model name wrong,
+    // key invalid, quota exceeded, etc.) without needing to SSH into the VM.
+    const detail = e?.message || String(e);
+    console.warn('[ai/chat] error:', detail);
+    res.status(502).json({
+      error: 'AI request failed.',
+      detail,
+      model: GEMINI_MODEL,
+      code: 'AI_ERROR',
+    });
   }
 });
 
