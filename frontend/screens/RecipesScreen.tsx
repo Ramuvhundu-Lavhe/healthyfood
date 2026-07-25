@@ -1,8 +1,9 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { getRecipes, getPantry, getSavedRecipes, saveRecipe, unsaveRecipe, recordCooked } from '../api';
 import { Recipe } from '../types';
 import { useProfile } from '../context/ProfileContext';
-import { Clock, CheckCircle, AlertTriangle, AlertCircle, X, ShoppingBasket, Zap, Target, Users, ShieldCheck, Info, RefreshCw, Filter, Flame, PiggyBank, Sparkles, ChevronDown, Search, Wand2, Bot, Heart } from 'lucide-react';
+import StyledDropdown, { DropdownOption } from '../components/StyledDropdown';
+import { Clock, CheckCircle, AlertTriangle, AlertCircle, X, ShoppingBasket, Zap, Target, ShieldCheck, Info, RefreshCw, Filter, Flame, PiggyBank, Sparkles, Search, Bot, Heart, Beef, Leaf, WheatOff, Dumbbell, Feather, Trophy, Flag, Mountain, Minus, Send } from 'lucide-react';
 
 // Bi-directional substring match for "is this ingredient in the pantry?"
 function ingredientInPantry(ingName: string, pantryNames: string[]): boolean {
@@ -14,28 +15,21 @@ function ingredientInPantry(ingName: string, pantryNames: string[]): boolean {
   });
 }
 
-// Native-select dropdown styled to match the pill chips. Native selects avoid
-// the overflow-clip bug the custom dropdown had inside the horizontal scroller,
-// and give us free keyboard + mobile-picker support.
-const CustomDropdown = ({ value, options, onChange, icon: Icon, labelPrefix = "" }: any) => (
-  <div className="relative flex-shrink-0">
-    {Icon && (
-      <Icon size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--ink-muted)] pointer-events-none" />
-    )}
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className={`appearance-none bg-[var(--bg)] border border-[var(--line)] text-[var(--ink)] py-1.5 rounded-full text-xs font-bold hover:border-[var(--teal)] focus:border-[var(--teal)] outline-none transition-colors cursor-pointer ${Icon ? 'pl-8' : 'pl-3'} pr-7`}
-    >
-      {options.map((opt: any) => (
-        <option key={opt.value} value={opt.value}>
-          {labelPrefix}{opt.label}
-        </option>
-      ))}
-    </select>
-    <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--ink-muted)] pointer-events-none" />
+const SkeletonRecipeCard: React.FC = () => (
+  <div className="discovery-card overflow-hidden p-0 animate-pulse">
+    <div className="h-44 w-full bg-[var(--line)]/60" />
+    <div className="p-4 space-y-3">
+      <div className="h-5 w-3/4 bg-[var(--line)]/60 rounded" />
+      <div className="flex gap-2">
+        <div className="h-4 w-16 bg-[var(--line)]/50 rounded-full" />
+        <div className="h-4 w-20 bg-[var(--line)]/50 rounded-full" />
+      </div>
+      <div className="h-4 w-1/2 bg-[var(--line)]/50 rounded" />
+      <div className="h-10 w-full bg-[var(--line)]/40 rounded-lg" />
+    </div>
   </div>
 );
+
 
 const RecipesScreen: React.FC = () => {
   const { profile, addToast, openAI } = useProfile();
@@ -51,6 +45,8 @@ const RecipesScreen: React.FC = () => {
   const [selectedMissing, setSelectedMissing] = useState<Recipe | null>(null);
   const [viewRecipe, setViewRecipe] = useState<Recipe | null>(null);
   const [markingCooked, setMarkingCooked] = useState(false);
+  // Memoize recipe results per filter combination so flipping back is instant
+  const cacheRef = useRef<Map<string, Recipe[]>>(new Map());
   
   // Context Bar State
   const [powerOn, setPowerOn] = useState(profile?.preferences.power_available ?? true);
@@ -59,20 +55,24 @@ const RecipesScreen: React.FC = () => {
   const [diet, setDiet] = useState(profile?.preferences.diet ?? 'all');
   const [servings, setServings] = useState(profile?.preferences.household_size ?? 4);
 
-  const fetchRecipes = async (searchPrompt?: string) => {
+  const fetchRecipes = async (searchPrompt?: string, force = false) => {
     if (!profile) return;
-    setLoading(true);
-    
-    // Animate agent status messages for realistic feedback
-    setAgentStatus(searchPrompt ? `🔍 AI Agent searching web for "${searchPrompt}"...` : "🔍 AI Agent scanning pantry & web recipes...");
-    
-    const statusTimer1 = setTimeout(() => {
-      setAgentStatus("👩‍🍳 Synthesizing custom tailored recipes...");
-    }, 400);
+    const effectiveSearch = searchPrompt ?? searchQuery;
+    const cacheKey = `${diet}|${goal}|${event}|${powerOn}|${effectiveSearch}`;
 
-    const statusTimer2 = setTimeout(() => {
-      setAgentStatus("📸 Generating matching dish visual depictions...");
-    }, 800);
+    // Cache hit — instant, no API call, no reflow
+    if (!force && cacheRef.current.has(cacheKey)) {
+      setRecipes(cacheRef.current.get(cacheKey)!);
+      if (searchPrompt !== undefined) setActiveSearchTerm(searchPrompt);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setAgentStatus(effectiveSearch ? `Searching for "${effectiveSearch}"...` : "Building recipes from your pantry...");
+
+    const statusTimer1 = setTimeout(() => setAgentStatus("Applying your diet, allergies & goals..."), 500);
+    const statusTimer2 = setTimeout(() => setAgentStatus("Matching dish photos..."), 1200);
 
     try {
       const data = await getRecipes(profile.customer_id, {
@@ -80,13 +80,12 @@ const RecipesScreen: React.FC = () => {
         goal,
         event,
         diet,
-        search: searchPrompt ?? searchQuery,
-        refresh: Date.now()
+        search: effectiveSearch,
+        refresh: force ? Date.now() : undefined,
       });
+      cacheRef.current.set(cacheKey, data.recipes);
       setRecipes(data.recipes);
-      if (searchPrompt !== undefined) {
-        setActiveSearchTerm(searchPrompt);
-      }
+      if (searchPrompt !== undefined) setActiveSearchTerm(searchPrompt);
     } catch (e) {
       console.error(e);
     } finally {
@@ -180,105 +179,113 @@ const RecipesScreen: React.FC = () => {
     return acc;
   }, {} as Record<string, Recipe[]>);
 
-  const dietOptions = [
-    { value: 'all', label: 'All Diets' },
-    { value: 'vegetarian', label: 'Vegetarian' },
-    { value: 'vegan', label: 'Vegan' },
-    { value: 'banting', label: 'Banting' },
-    { value: 'halal', label: 'Halal' }
+  const dietOptions: DropdownOption[] = [
+    { value: 'all',        label: 'All Diets',   icon: Beef },
+    { value: 'vegetarian', label: 'Vegetarian',  icon: Leaf },
+    { value: 'vegan',      label: 'Vegan',       icon: Leaf },
+    { value: 'banting',    label: 'Banting',     icon: WheatOff },
+    { value: 'halal',      label: 'Halal',       icon: ShieldCheck },
   ];
 
-  const goalOptions = [
-    { value: 'general', label: 'General' },
-    { value: 'build', label: '💪 Build' },
-    { value: 'lean', label: '🏃 Lean' }
+  const goalOptions: DropdownOption[] = [
+    { value: 'general', label: 'General', icon: Target },
+    { value: 'build',   label: 'Build',   icon: Dumbbell },
+    { value: 'lean',    label: 'Lean',    icon: Feather },
   ];
 
-  const eventOptions = [
-    { value: 'none', label: 'None' },
-    { value: 'marathon', label: '🏅 Marathon' },
-    { value: 'match', label: '⚽ Match' },
-    { value: 'hike', label: '🥾 Hike' }
+  const eventOptions: DropdownOption[] = [
+    { value: 'none',     label: 'None',     icon: Minus },
+    { value: 'marathon', label: 'Marathon', icon: Trophy },
+    { value: 'match',    label: 'Match',    icon: Flag },
+    { value: 'hike',     label: 'Hike',     icon: Mountain },
   ];
 
   return (
     <div className="pb-28 relative min-h-screen flex flex-col">
       {/* Header */}
       <div className="bg-[var(--navy)] pt-10 pb-5 px-6 shadow-md z-10">
-        <div className="flex justify-between items-start">
-          <div>
-            <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-              What can I cook?
-            </h1>
-            <p className="text-[var(--navy-tint)] mt-1 opacity-90 text-xs">AI Agent recipe generation & web search · matched visuals</p>
+        <div className="flex justify-between items-start gap-3">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold text-white leading-tight">What can I cook?</h1>
+            <p className="text-[var(--navy-tint)] opacity-80 text-xs mt-1">AI-generated · uses your pantry · respects your diet</p>
           </div>
-          <button 
-            onClick={() => fetchRecipes(searchQuery)}
+          <button
+            onClick={() => fetchRecipes(searchQuery, true)}
             disabled={loading}
-            className="flex items-center gap-1 bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-3 py-1.5 rounded-full backdrop-blur-sm transition-colors border border-white/20"
+            className="flex-shrink-0 flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-3 py-1.5 rounded-full backdrop-blur-sm transition-colors border border-white/20 disabled:opacity-60"
             title="Generate fresh AI recipes"
           >
             <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
-            AI Refresh
+            Refresh
           </button>
         </div>
 
-        {/* AI Agent & Web Search Form */}
-        <form onSubmit={handleSearchSubmit} className="mt-4 flex gap-2">
-          <div className="relative flex-1">
-            <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--navy-tint)]" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Ask AI agent or search web (e.g. winter soup, high protein)..."
-              className="w-full bg-black/20 border border-white/20 rounded-full pl-9 pr-8 py-2 text-xs text-white placeholder:text-[var(--navy-tint)]/70 focus:outline-none focus:border-[var(--teal)] transition-colors"
-            />
-            {searchQuery && (
-              <button 
-                type="button" 
-                onClick={handleClearSearch}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--navy-tint)] hover:text-white"
-              >
-                <X size={14} />
-              </button>
-            )}
-          </div>
+        {/* Unified search + generate — one control, teal-ring on focus */}
+        <form
+          onSubmit={handleSearchSubmit}
+          className="mt-4 flex items-center bg-white rounded-full px-1 py-1 focus-within:ring-2 focus-within:ring-[var(--teal)] shadow-sm"
+        >
+          <Search size={16} className="ml-3 mr-2 text-[var(--ink-muted)] flex-shrink-0" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Winter soup, high protein…"
+            className="flex-1 bg-transparent py-2 text-sm text-[var(--ink)] placeholder:text-[var(--ink-muted)] outline-none min-w-0"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={handleClearSearch}
+              className="p-1.5 text-[var(--ink-muted)] hover:text-[var(--ink)] flex-shrink-0"
+              aria-label="Clear search"
+            >
+              <X size={14} />
+            </button>
+          )}
           <button
             type="submit"
             disabled={loading}
-            className="bg-[var(--teal)] hover:bg-[#0092A6] text-white px-3.5 py-2 rounded-full text-xs font-bold flex items-center transition-colors shadow-sm"
+            className="w-9 h-9 bg-[var(--teal)] hover:bg-[#0092A6] text-white rounded-full flex items-center justify-center flex-shrink-0 disabled:opacity-50 transition-colors"
+            aria-label="Generate recipes"
           >
-            <Wand2 size={13} className="mr-1.5" />
-            Generate
+            <Sparkles size={16} />
           </button>
         </form>
       </div>
 
-      {/* Context Bar */}
-      <div className="bg-white border-b border-[var(--line)] px-4 py-3 flex space-x-2 overflow-x-auto hide-scrollbar shadow-sm z-10 sticky top-0">
+      {/* Context Bar — standardized pill heights + right-edge fade mask */}
+      <div
+        className="bg-white border-b border-[var(--line)] px-4 py-3 flex items-center gap-2 overflow-x-auto hide-scrollbar shadow-sm z-10 sticky top-0"
+        style={{ WebkitMaskImage: 'linear-gradient(to right, black 92%, transparent)', maskImage: 'linear-gradient(to right, black 92%, transparent)' }}
+      >
         <button
           onClick={() => setViewingSaved(!viewingSaved)}
-          className={`flex-shrink-0 flex items-center px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${
-            viewingSaved ? 'bg-[var(--alert-red)] text-white border-[var(--alert-red)]' : 'bg-[var(--bg)] text-[var(--ink)] border-[var(--line)]'
+          className={`flex-shrink-0 inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-bold border-2 transition-colors ${
+            viewingSaved
+              ? 'bg-[var(--alert-red)] border-[var(--alert-red)] text-white'
+              : 'bg-[var(--bg)] border-[var(--line)] text-[var(--ink)]'
           }`}
         >
-          <Heart size={13} className={`mr-1.5 ${viewingSaved ? 'fill-white' : ''}`} />
-          Saved ({savedRecipes.length})
-        </button>
-        <button
-          onClick={() => setPowerOn(!powerOn)}
-          className={`flex-shrink-0 flex items-center px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${
-            !powerOn ? 'bg-[var(--navy)] text-white border-[var(--navy)]' : 'bg-[var(--bg)] text-[var(--ink)] border-[var(--line)]'
-          }`}
-        >
-          <Zap size={14} className="mr-1.5" />
-          {!powerOn ? 'Load-shedding' : 'Power On'}
+          <Heart size={13} className={viewingSaved ? 'fill-white' : ''} />
+          <span>Saved ({savedRecipes.length})</span>
         </button>
 
-        <CustomDropdown value={diet} options={dietOptions} onChange={setDiet} icon={Filter} />
-        <CustomDropdown value={goal} options={goalOptions} onChange={setGoal} labelPrefix="Goal: " />
-        <CustomDropdown value={event} options={eventOptions} onChange={setEvent} labelPrefix="Event: " />
+        <button
+          onClick={() => setPowerOn(!powerOn)}
+          className={`flex-shrink-0 inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-bold border-2 transition-colors ${
+            !powerOn
+              ? 'bg-white border-[var(--teal)] text-[var(--navy)]'
+              : 'bg-[var(--bg)] border-[var(--line)] text-[var(--ink)]'
+          }`}
+        >
+          <Zap size={14} className={!powerOn ? 'text-[var(--teal)]' : 'text-[var(--ink-muted)]'} />
+          <span>{!powerOn ? 'Load-shedding' : 'Power On'}</span>
+        </button>
+
+        <StyledDropdown value={diet}  options={dietOptions}  onChange={setDiet}  triggerIcon={Filter} ariaLabel="Diet" />
+        <StyledDropdown value={goal}  options={goalOptions}  onChange={setGoal}  labelPrefix="Goal: "  ariaLabel="Fitness goal" />
+        <StyledDropdown value={event} options={eventOptions} onChange={setEvent} labelPrefix="Event: " ariaLabel="Upcoming event" />
       </div>
 
       {/* Active Search Badge */}
