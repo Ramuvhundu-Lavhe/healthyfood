@@ -1,9 +1,19 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI } from '@google/genai';
-import { MessageSquare, X, Send, Bot, User, Sparkles, Clock, Users, CheckCircle, ShoppingCart, ChefHat, Flame, ThumbsUp, ThumbsDown, Check } from 'lucide-react';
+import { MessageSquare, X, Send, Bot, User, Sparkles, Clock, Users, CheckCircle, ShoppingCart, ChefHat, Flame, ThumbsUp, ThumbsDown, Check, Heart, AlertCircle } from 'lucide-react';
 import { useProfile } from '../context/ProfileContext';
 import { Recipe } from '../types';
-import { getRecipes, recordCooked, recordReview } from '../api';
+import { getRecipes, recordCooked, recordReview, saveRecipe, unsaveRecipe, getSavedRecipes, getPantry } from '../api';
+
+// Bi-directional substring match — handles brand names vs generic pantry items
+function ingredientInPantry(ingName: string, pantryNames: string[]): boolean {
+  const i = String(ingName || '').toLowerCase().trim();
+  if (!i) return false;
+  return pantryNames.some(p => {
+    const pn = p.toLowerCase().trim();
+    return pn.includes(i) || i.includes(pn);
+  });
+}
 
 interface Message {
   id: string;
@@ -20,9 +30,17 @@ function isRecipeIntent(text: string): boolean {
   return RECIPE_INTENT.test(text);
 }
 
-const RecipeChatCard: React.FC<{ recipe: Recipe; customerId: string; onToast: (msg: string) => void }> = ({ recipe, customerId, onToast }) => {
+const RecipeChatCard: React.FC<{
+  recipe: Recipe;
+  customerId: string;
+  onToast: (msg: string) => void;
+  pantryNames: string[];
+  isSavedInit: boolean;
+  onSaveToggle: (recipeName: string, saved: boolean) => void;
+}> = ({ recipe, customerId, onToast, pantryNames, isSavedInit, onSaveToggle }) => {
   const [cooked, setCooked] = useState(false);
   const [rating, setRating] = useState<0 | 1 | -1>(0);
+  const [saved, setSaved] = useState(isSavedInit);
 
   const markCooked = async () => {
     setCooked(true);
@@ -34,6 +52,20 @@ const RecipeChatCard: React.FC<{ recipe: Recipe; customerId: string; onToast: (m
     setRating(r);
     onToast(r > 0 ? 'Thanks — we\'ll suggest more like this' : 'Got it — you\'ll see less like this');
     await recordReview(customerId, recipe.name, r);
+  };
+
+  const toggleSave = async () => {
+    if (saved) {
+      setSaved(false);
+      onToast(`Removed "${recipe.name}" from saved`);
+      onSaveToggle(recipe.name, false);
+      await unsaveRecipe(customerId, recipe.name);
+    } else {
+      setSaved(true);
+      onToast(`Saved "${recipe.name}"`);
+      onSaveToggle(recipe.name, true);
+      await saveRecipe(customerId, recipe);
+    }
   };
 
   return (
@@ -51,6 +83,13 @@ const RecipeChatCard: React.FC<{ recipe: Recipe; customerId: string; onToast: (m
           <Flame size={10} className="mr-1" /> USES EXPIRING
         </div>
       )}
+      <button
+        onClick={toggleSave}
+        className="absolute top-2 right-2 p-1.5 bg-white/90 backdrop-blur-sm rounded-full shadow-sm"
+        aria-label={saved ? 'Unsave' : 'Save'}
+      >
+        <Heart size={16} className={saved ? 'text-[var(--alert-red)] fill-[var(--alert-red)]' : 'text-[var(--ink-muted)]'} />
+      </button>
     </div>
     <div className="p-3">
       <h4 className="font-bold text-[var(--ink)] text-sm leading-tight">{recipe.name}</h4>
@@ -67,18 +106,27 @@ const RecipeChatCard: React.FC<{ recipe: Recipe; customerId: string; onToast: (m
 
       <p className="text-[11px] text-[var(--ink-muted)] mt-2 italic">{recipe.health_benefit}</p>
 
-      {/* From your pantry */}
+      {/* Ingredients — red when NOT in pantry */}
       <div className="mt-3">
-        <p className="text-[10px] font-bold text-[var(--healthy-green)] uppercase tracking-wide mb-1 flex items-center">
-          <CheckCircle size={11} className="mr-1" /> From your pantry
+        <p className="text-[10px] font-bold text-[var(--ink)] uppercase tracking-wide mb-1 flex items-center">
+          <CheckCircle size={11} className="mr-1 text-[var(--healthy-green)]" /> Ingredients
         </p>
         <ul className="space-y-0.5">
-          {recipe.ingredients.map((ing, i) => (
-            <li key={i} className="text-[11px] text-[var(--ink)] flex justify-between">
-              <span>• {ing.name}</span>
-              <span className="text-[var(--ink-muted)]">{ing.amount}</span>
-            </li>
-          ))}
+          {recipe.ingredients.map((ing, i) => {
+            const inPantry = ingredientInPantry(ing.name, pantryNames);
+            return (
+              <li key={i} className={`text-[11px] flex justify-between ${inPantry ? 'text-[var(--ink)]' : 'text-[var(--alert-red)]'}`}>
+                <span className="flex items-center">
+                  {inPantry
+                    ? <CheckCircle size={10} className="mr-1 text-[var(--healthy-green)]" />
+                    : <AlertCircle size={10} className="mr-1" />}
+                  {ing.name}
+                  {!inPantry && <span className="ml-1 text-[9px] font-bold bg-[#FFE9E4] px-1 py-0.5 rounded">BUY</span>}
+                </span>
+                <span className="opacity-70">{ing.amount}</span>
+              </li>
+            );
+          })}
         </ul>
       </div>
 
@@ -160,7 +208,28 @@ const AIAssistant: React.FC = () => {
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [pantryNames, setPantryNames] = useState<string[]>([]);
+  const [savedNames, setSavedNames] = useState<Set<string>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Load pantry + saved recipes once we have a profile — used to render each recipe card
+  useEffect(() => {
+    if (!profile) return;
+    getPantry(profile.customer_id).then(p => setPantryNames(p.items.map(i => i.name)));
+    getSavedRecipes(profile.customer_id).then(s =>
+      setSavedNames(new Set(s.items.map(r => String(r.name).toLowerCase().trim())))
+    );
+  }, [profile?.customer_id]);
+
+  const handleSaveToggle = (recipeName: string, saved: boolean) => {
+    const key = recipeName.toLowerCase().trim();
+    setSavedNames(prev => {
+      const next = new Set(prev);
+      if (saved) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  };
 
   const GEMINI_API_KEY = (import.meta as any).env?.VITE_GEMINI_API_KEY;
   const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
@@ -300,7 +369,15 @@ const AIAssistant: React.FC = () => {
                 }`}>
                   <div>{msg.text}</div>
                   {msg.recipes && profile && msg.recipes.map((r, idx) => (
-                    <RecipeChatCard key={idx} recipe={r} customerId={profile.customer_id} onToast={addToast} />
+                    <RecipeChatCard
+                      key={idx}
+                      recipe={r}
+                      customerId={profile.customer_id}
+                      onToast={addToast}
+                      pantryNames={pantryNames}
+                      isSavedInit={savedNames.has(String(r.name).toLowerCase().trim())}
+                      onSaveToggle={handleSaveToggle}
+                    />
                   ))}
                 </div>
               </div>

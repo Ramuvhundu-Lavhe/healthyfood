@@ -372,6 +372,26 @@ export const getMe = async (): Promise<{ username: string; customer_id: string; 
   return response.data;
 };
 
+// ─────────────── Saved recipes (per-user) ───────────────
+export const getSavedRecipes = async (customerId: string): Promise<{ items: Recipe[] }> => {
+  try {
+    const response = await axios.get(`${API_URL}/saved/${customerId}`);
+    return response.data;
+  } catch {
+    return { items: [] };
+  }
+};
+
+export const saveRecipe = async (customerId: string, recipe: Recipe): Promise<void> => {
+  try { await axios.post(`${API_URL}/saved/${customerId}`, { recipe }); }
+  catch (e) { console.warn('saveRecipe failed:', (e as Error).message); }
+};
+
+export const unsaveRecipe = async (customerId: string, name: string): Promise<void> => {
+  try { await axios.delete(`${API_URL}/saved/${customerId}/${encodeURIComponent(name)}`); }
+  catch (e) { console.warn('unsaveRecipe failed:', (e as Error).message); }
+};
+
 // ─────────────── Cooked + Reviews ───────────────
 export const recordCooked = async (customerId: string, recipe_name: string, ingredients?: string[]): Promise<void> => {
   try { await axios.post(`${API_URL}/cooked/${customerId}`, { recipe_name, ingredients }); }

@@ -17,6 +17,7 @@ const DEFAULT_STATE = {
   cooked: {},         // customer_id -> [{ recipe_name, ingredients, cooked_at }]
   reviews: {},        // customer_id -> { recipe_name -> { rating: 1|-1, tags, reviewed_at } }
   pantry_added: {},   // customer_id -> [{ name, category, added_at }]
+  saved: {},          // customer_id -> [{ ...recipe, saved_at }] (per-user isolated)
   next_customer_num: 100,
 };
 
@@ -137,5 +138,28 @@ export const db = {
     state.pantry_added[cid] = state.pantry_added[cid].filter(i => i.name.toLowerCase().trim() !== key);
     if (state.pantry_added[cid].length < before) { save(); return true; }
     return false;
+  },
+
+  // Saved recipes — per customer, isolated across users
+  addSaved: (cid, recipe) => {
+    if (!state.saved[cid]) state.saved[cid] = [];
+    const key = String(recipe.name || '').toLowerCase().trim();
+    state.saved[cid] = state.saved[cid].filter(r => String(r.name).toLowerCase().trim() !== key);
+    state.saved[cid].unshift({ ...recipe, saved_at: Date.now() });
+    state.saved[cid] = state.saved[cid].slice(0, 100);
+    save();
+  },
+  removeSaved: (cid, name) => {
+    if (!state.saved[cid]) return false;
+    const before = state.saved[cid].length;
+    const key = String(name).toLowerCase().trim();
+    state.saved[cid] = state.saved[cid].filter(r => String(r.name).toLowerCase().trim() !== key);
+    if (state.saved[cid].length < before) { save(); return true; }
+    return false;
+  },
+  getSaved: (cid) => state.saved[cid] || [],
+  isSaved: (cid, name) => {
+    const key = String(name || '').toLowerCase().trim();
+    return (state.saved[cid] || []).some(r => String(r.name).toLowerCase().trim() === key);
   },
 };

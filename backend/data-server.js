@@ -548,7 +548,7 @@ Return strict JSON format:
     }
   ]
 }
-Generate 3 personalized recipes. Only pantry ingredients (plus 1-2 common staples in missing_items if necessary). No preamble.`;
+Generate 6 diverse personalized recipes — vary cooking methods (bake, stir-fry, boil, no-cook, one-pot) and meal types (light, hearty, quick, slow) so the user has real choice. When the user's search names an ingredient (e.g. "chicken"), return several distinct dishes featuring that ingredient (soups, bowls, curries, salads, roasts). Only pantry ingredients (plus 1-2 common staples in missing_items if necessary). No preamble.`;
 
   const out = await callGemini(prompt);
   const dislikedLower = new Set(disliked.map(d => d.toLowerCase()));
@@ -736,6 +736,24 @@ app.get('/cooked/:customerId', (req, res) => {
   res.json({ items: db.getCooked(cid) });
 });
 
+// ── Saved recipes (per-user, isolated) ──
+app.get('/saved/:customerId', (req, res) => {
+  const cid = resolveCid(req);
+  res.json({ items: db.getSaved(cid) });
+});
+app.post('/saved/:customerId', (req, res) => {
+  const cid = resolveCid(req);
+  const recipe = req.body?.recipe;
+  if (!recipe?.name) return res.status(400).json({ error: 'recipe (with a name) required' });
+  db.addSaved(cid, recipe);
+  res.json({ ok: true, items: db.getSaved(cid) });
+});
+app.delete('/saved/:customerId/:name', (req, res) => {
+  const cid = resolveCid(req);
+  const removed = db.removeSaved(cid, decodeURIComponent(req.params.name));
+  res.json({ ok: true, removed, items: db.getSaved(cid) });
+});
+
 // ── Reviews (like/dislike) ──
 app.post('/reviews/:customerId', (req, res) => {
   const cid = resolveCid(req);
@@ -782,16 +800,25 @@ function fallbackRecipes(cid, query = {}) {
     recipes.push(mkRecipe(`Searing ${protein} & ${veg} Skillet`, ['⚡ Quick', 12], [protein, veg, 'Olive Oil'], 'Low-carb, high-protein meal made from your pantry.', false));
     recipes.push(mkRecipe(`Power ${grain} & ${protein} Salad`, ['❄ No-cook', 10], [protein, grain, veg], 'Nutrient dense energy meal packed with iron.', true));
   } else if (userSearch) {
-    recipes.push(mkRecipe(`Pantry ${capitalize(userSearch)} with ${protein}`, ['⚡ Quick', 15], [protein, grain, veg], `Custom AI Agent generated recipe for ${userSearch} using your pantry.`, true));
-    recipes.push(mkRecipe(`Savory ${capitalize(userSearch)} Medley`, ['🔥 Gas-friendly', 20], [grain, veg, 'Olive Oil'], `AI web-searched creation utilizing pantry staples.`, false));
+    const s = capitalize(userSearch);
+    recipes.push(mkRecipe(`Pantry ${s} with ${protein}`, ['⚡ Quick', 15], [protein, grain, veg], `Custom AI recipe for ${userSearch} using your pantry.`, true));
+    recipes.push(mkRecipe(`Savory ${s} Medley`, ['🔥 Gas-friendly', 20], [grain, veg, 'Olive Oil'], `Pantry staples reworked around ${userSearch}.`, false));
     recipes.push(mkRecipe(`Quick ${veg} & ${protein} Stir-Fry`, ['⚡ Quick', 10], [protein, veg], `Fast healthy meal customized to your available items.`, true));
+    recipes.push(mkRecipe(`${s} Bowl with ${grain}`, ['⚡ Quick', 12], [protein, grain, veg], `A bowl-style ${userSearch} dish balancing protein and slow carbs.`, false));
+    recipes.push(mkRecipe(`Hearty ${s} & ${grain} Pot`, ['⏳ Long cook', 40], [protein, grain, veg, 'Tinned Tomatoes'], `Slow-cooked ${userSearch} for comfort and depth of flavor.`, true));
+    recipes.push(mkRecipe(`Zesty ${s} & ${veg} Salad`, ['❄ No-cook', 8], [veg, protein, 'Olive Oil'], `Light, no-cook ${userSearch} salad — perfect quick lunch.`, false));
+    recipes.push(mkRecipe(`Roast ${s} with ${veg}`, ['🔥 Oven', 35], [protein, veg, 'Olive Oil'], `A more traditional ${userSearch} roast, uses items you have.`, false));
   } else {
     recipes.push(mkRecipe(`${protein} & ${veg} with ${grain}`, ['⚡ Quick', 15], [protein, grain, veg, 'Olive Oil'], 'High in protein and Omega-3s using your pantry items.', true));
     recipes.push(mkRecipe(`Hearty ${veg} & ${grain} Stew`, ['⏳ Long cook', 45], [grain, veg, 'Tinned Tomatoes'], 'Rich in fibre and antioxidants with zero waste.', false));
     recipes.push(mkRecipe(`Fresh Fruit & ${grain} Breakfast Bowl`, ['❄ No-cook', 5], ['Fresh Fruit', grain], 'Vitamins and complex carbs from your pantry to start your day.', false));
+    recipes.push(mkRecipe(`One-pot ${protein} & ${grain}`, ['🔥 One-pot', 25], [protein, grain, veg], 'Weeknight one-pot — minimal washing up, maximum nutrition.', false));
+    recipes.push(mkRecipe(`${veg} & ${grain} Wrap`, ['⚡ Quick', 8], [veg, grain, 'Olive Oil'], 'Quick lunch wrap with what you have on hand.', false));
+    recipes.push(mkRecipe(`Zero-waste ${protein} bake`, ['🔥 Oven', 30], [protein, veg, 'Tinned Tomatoes'], 'Baked and forgiving — uses items before they turn.', true));
   }
 
-  return { recipes: recipes.slice(0, 3) };
+  const wantedMax = userSearch ? 8 : 6;
+  return { recipes: recipes.slice(0, wantedMax) };
 }
 
 function capitalize(s) {

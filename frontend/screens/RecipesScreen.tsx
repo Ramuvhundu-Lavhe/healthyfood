@@ -1,8 +1,18 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { getRecipes } from '../api';
+import { getRecipes, getPantry, getSavedRecipes, saveRecipe, unsaveRecipe, recordCooked } from '../api';
 import { Recipe } from '../types';
 import { useProfile } from '../context/ProfileContext';
-import { Clock, CheckCircle, AlertTriangle, X, ShoppingBasket, Zap, Target, Users, ShieldCheck, Info, RefreshCw, Filter, Flame, PiggyBank, Sparkles, ChevronDown, Search, Wand2, Bot } from 'lucide-react';
+import { Clock, CheckCircle, AlertTriangle, AlertCircle, X, ShoppingBasket, Zap, Target, Users, ShieldCheck, Info, RefreshCw, Filter, Flame, PiggyBank, Sparkles, ChevronDown, Search, Wand2, Bot, Heart } from 'lucide-react';
+
+// Bi-directional substring match for "is this ingredient in the pantry?"
+function ingredientInPantry(ingName: string, pantryNames: string[]): boolean {
+  const i = String(ingName || '').toLowerCase().trim();
+  if (!i) return false;
+  return pantryNames.some(p => {
+    const pn = p.toLowerCase().trim();
+    return pn.includes(i) || i.includes(pn);
+  });
+}
 
 // Custom Dropdown Component for a seamless look
 const CustomDropdown = ({ value, options, onChange, icon: Icon, labelPrefix = "" }: any) => {
@@ -52,12 +62,17 @@ const CustomDropdown = ({ value, options, onChange, icon: Icon, labelPrefix = ""
 const RecipesScreen: React.FC = () => {
   const { profile, addToast, openAI } = useProfile();
   const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [savedRecipes, setSavedRecipes] = useState<Recipe[]>([]);
+  const [savedNames, setSavedNames] = useState<Set<string>>(new Set());
+  const [pantryNames, setPantryNames] = useState<string[]>([]);
+  const [viewingSaved, setViewingSaved] = useState(false);
   const [loading, setLoading] = useState(true);
   const [agentStatus, setAgentStatus] = useState("🔍 AI Agent searching web & matching pantry...");
   const [searchQuery, setSearchQuery] = useState("");
   const [activeSearchTerm, setActiveSearchTerm] = useState("");
   const [selectedMissing, setSelectedMissing] = useState<Recipe | null>(null);
   const [viewRecipe, setViewRecipe] = useState<Recipe | null>(null);
+  const [markingCooked, setMarkingCooked] = useState(false);
   
   // Context Bar State
   const [powerOn, setPowerOn] = useState(profile?.preferences.power_available ?? true);
@@ -104,8 +119,42 @@ const RecipesScreen: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchRecipes();
+    if (!viewingSaved) fetchRecipes();
   }, [profile, powerOn, goal, event, diet]);
+
+  // Load pantry + saved recipes once we know the customer
+  useEffect(() => {
+    if (!profile) return;
+    getPantry(profile.customer_id).then(p => setPantryNames(p.items.map(i => i.name)));
+    refreshSaved();
+  }, [profile?.customer_id]);
+
+  const refreshSaved = async () => {
+    if (!profile) return;
+    const data = await getSavedRecipes(profile.customer_id);
+    setSavedRecipes(data.items);
+    setSavedNames(new Set(data.items.map(r => String(r.name).toLowerCase().trim())));
+  };
+
+  const toggleSave = async (recipe: Recipe) => {
+    if (!profile) return;
+    const key = recipe.name.toLowerCase().trim();
+    const isCurrentlySaved = savedNames.has(key);
+    // Optimistic UI
+    setSavedNames(prev => {
+      const next = new Set(prev);
+      if (isCurrentlySaved) next.delete(key); else next.add(key);
+      return next;
+    });
+    if (isCurrentlySaved) {
+      addToast(`Removed "${recipe.name}" from saved`);
+      await unsaveRecipe(profile.customer_id, recipe.name);
+    } else {
+      addToast(`Saved "${recipe.name}"`);
+      await saveRecipe(profile.customer_id, recipe);
+    }
+    refreshSaved();
+  };
 
   if (!profile) return null;
 
@@ -121,9 +170,16 @@ const RecipesScreen: React.FC = () => {
     fetchRecipes("");
   };
 
-  const handleCooked = () => {
-    setViewRecipe(null);
-    addToast("Marked as cooked — Pantry Pro +1 🎉");
+  const handleCooked = async () => {
+    if (!viewRecipe || !profile || markingCooked) return;
+    setMarkingCooked(true);
+    try {
+      await recordCooked(profile.customer_id, viewRecipe.name, viewRecipe.ingredients.map(i => i.name));
+      addToast("Marked as cooked — future recipes will lean this way 🎉");
+    } finally {
+      setMarkingCooked(false);
+      setViewRecipe(null);
+    }
   };
 
   const handleAddToList = () => {
@@ -135,8 +191,11 @@ const RecipesScreen: React.FC = () => {
     openAI(`Can you give me some tips on how to perfectly prepare the ${recipeName}?`);
   };
 
+  // Which list are we rendering?
+  const activeList = viewingSaved ? savedRecipes : recipes;
+
   // Group recipes by prep_time_category
-  const groupedRecipes = recipes.reduce((acc, recipe) => {
+  const groupedRecipes = activeList.reduce((acc, recipe) => {
     const cat = recipe.prep_time_category || 'Other';
     if (!acc[cat]) acc[cat] = [];
     acc[cat].push(recipe);
@@ -220,7 +279,16 @@ const RecipesScreen: React.FC = () => {
 
       {/* Context Bar */}
       <div className="bg-white border-b border-[var(--line)] px-4 py-3 flex space-x-2 overflow-x-auto hide-scrollbar shadow-sm z-10 sticky top-0">
-        <button 
+        <button
+          onClick={() => setViewingSaved(!viewingSaved)}
+          className={`flex-shrink-0 flex items-center px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${
+            viewingSaved ? 'bg-[var(--alert-red)] text-white border-[var(--alert-red)]' : 'bg-[var(--bg)] text-[var(--ink)] border-[var(--line)]'
+          }`}
+        >
+          <Heart size={13} className={`mr-1.5 ${viewingSaved ? 'fill-white' : ''}`} />
+          Saved ({savedRecipes.length})
+        </button>
+        <button
           onClick={() => setPowerOn(!powerOn)}
           className={`flex-shrink-0 flex items-center px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${
             !powerOn ? 'bg-[var(--navy)] text-white border-[var(--navy)]' : 'bg-[var(--bg)] text-[var(--ink)] border-[var(--line)]'
@@ -270,10 +338,21 @@ const RecipesScreen: React.FC = () => {
               <p className="text-xs text-[var(--ink-muted)]">Using Gemini AI agent & recipe search to match dish contents</p>
             </div>
           </div>
-        ) : recipes.length === 0 ? (
+        ) : activeList.length === 0 ? (
           <div className="text-center text-[var(--ink-muted)] py-10">
-            <p>No recipes found matching your prompt and filters.</p>
-            <button onClick={handleClearSearch} className="text-[var(--teal)] font-bold mt-2 underline">Clear Search & Filters</button>
+            {viewingSaved ? (
+              <>
+                <Heart size={32} className="mx-auto text-[var(--line)] mb-2" />
+                <p className="font-bold text-[var(--ink)]">No saved recipes yet</p>
+                <p className="text-sm mt-1">Tap the ♥ on any recipe to save it here.</p>
+                <button onClick={() => setViewingSaved(false)} className="text-[var(--teal)] font-bold mt-3 underline">Browse recipes</button>
+              </>
+            ) : (
+              <>
+                <p>No recipes found matching your prompt and filters.</p>
+                <button onClick={handleClearSearch} className="text-[var(--teal)] font-bold mt-2 underline">Clear Search & Filters</button>
+              </>
+            )}
           </div>
         ) : (
           Object.entries(groupedRecipes).map(([category, categoryRecipes]) => (
@@ -297,8 +376,23 @@ const RecipesScreen: React.FC = () => {
                           `https://images.unsplash.com/photo-1490645935967-10de6ba17061?w=800&q=80`;
                       }}
                     />
-                    <div className="absolute top-2 right-2 bg-white/90 backdrop-blur-sm px-2 py-1 rounded-md flex items-center text-xs font-bold text-[var(--ink)] shadow-sm">
-                      <Clock size={12} className="mr-1" /> {recipe.cook_time_minutes}m
+                    <div className="absolute top-2 right-2 flex items-center gap-1.5">
+                      <button
+                        onClick={() => toggleSave(recipe)}
+                        className="p-1.5 bg-white/90 backdrop-blur-sm rounded-full shadow-sm hover:scale-110 transition-transform"
+                        aria-label={savedNames.has(recipe.name.toLowerCase().trim()) ? 'Unsave' : 'Save'}
+                      >
+                        <Heart
+                          size={16}
+                          className={savedNames.has(recipe.name.toLowerCase().trim())
+                            ? 'text-[var(--alert-red)] fill-[var(--alert-red)]'
+                            : 'text-[var(--ink-muted)]'
+                          }
+                        />
+                      </button>
+                      <div className="bg-white/90 backdrop-blur-sm px-2 py-1 rounded-md flex items-center text-xs font-bold text-[var(--ink)] shadow-sm">
+                        <Clock size={12} className="mr-1" /> {recipe.cook_time_minutes}m
+                      </div>
                     </div>
                     {/* Diet Tags Overlay */}
                     <div className="absolute bottom-2 left-2 flex flex-wrap gap-1">
@@ -457,27 +551,48 @@ const RecipesScreen: React.FC = () => {
               </div>
             </div>
 
-            {/* Ingredients Section */}
-            <h3 className="text-lg font-bold text-[var(--navy)] mb-4">Ingredients</h3>
+            {/* Ingredients Section — red-flag anything NOT in the pantry */}
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-[var(--navy)]">Ingredients</h3>
+              <div className="flex items-center text-[10px] font-bold text-[var(--ink-muted)] gap-3">
+                <span className="flex items-center"><CheckCircle size={11} className="text-[var(--healthy-green)] mr-1" /> In pantry</span>
+                <span className="flex items-center"><AlertCircle size={11} className="text-[var(--alert-red)] mr-1" /> Need to buy</span>
+              </div>
+            </div>
             <ul className="space-y-3 mb-8">
-              {viewRecipe.ingredients.map((ing, idx) => (
-                <li key={idx} className="flex flex-col bg-[var(--bg)] p-3 rounded-lg border border-[var(--line)]">
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <span className="font-bold text-[var(--ink)]">{ing.amount}</span>
-                      <span className="text-[var(--ink)] ml-2">{ing.name}</span>
+              {viewRecipe.ingredients.map((ing, idx) => {
+                const inPantry = ingredientInPantry(ing.name, pantryNames);
+                return (
+                  <li key={idx} className={`flex flex-col p-3 rounded-lg border ${
+                    inPantry
+                      ? 'bg-[var(--bg)] border-[var(--line)]'
+                      : 'bg-[#FFE9E4] border-[var(--alert-red)]/40'
+                  }`}>
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center">
+                        {inPantry
+                          ? <CheckCircle size={16} className="text-[var(--healthy-green)] mr-2 flex-shrink-0" />
+                          : <AlertCircle size={16} className="text-[var(--alert-red)] mr-2 flex-shrink-0" />}
+                        <div>
+                          <span className={`font-bold ${inPantry ? 'text-[var(--ink)]' : 'text-[var(--alert-red)]'}`}>{ing.amount}</span>
+                          <span className={`ml-2 ${inPantry ? 'text-[var(--ink)]' : 'text-[var(--alert-red)] font-semibold'}`}>{ing.name}</span>
+                        </div>
+                      </div>
+                      {!inPantry && (
+                        <span className="text-[10px] font-bold bg-[var(--alert-red)] text-white px-2 py-0.5 rounded">BUY</span>
+                      )}
                     </div>
-                  </div>
-                  {ing.alternative && (
-                    <div className="mt-2 flex items-start text-xs">
-                      <RefreshCw size={12} className="text-[var(--teal)] mr-1.5 mt-0.5 flex-shrink-0" />
-                      <span className="text-[var(--ink-muted)]">
-                        <span className="font-bold text-[var(--teal)]">Alternative:</span> {ing.alternative}
-                      </span>
-                    </div>
-                  )}
-                </li>
-              ))}
+                    {ing.alternative && (
+                      <div className="mt-2 flex items-start text-xs">
+                        <RefreshCw size={12} className="text-[var(--teal)] mr-1.5 mt-0.5 flex-shrink-0" />
+                        <span className="text-[var(--ink-muted)]">
+                          <span className="font-bold text-[var(--teal)]">Alternative:</span> {ing.alternative}
+                        </span>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
 
             {/* Instructions Section */}
@@ -502,9 +617,20 @@ const RecipesScreen: React.FC = () => {
             </div>
           </div>
 
-          <div className="absolute bottom-0 left-0 right-0 p-4 bg-white border-t border-[var(--line)] shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
-            <button onClick={handleCooked} className="w-full discovery-btn-primary py-3.5 text-lg">
-              👨‍🍳 I cooked this
+          <div className="absolute bottom-0 left-0 right-0 p-4 bg-white border-t border-[var(--line)] shadow-[0_-4px_20px_rgba(0,0,0,0.05)] flex gap-2">
+            <button
+              onClick={() => toggleSave(viewRecipe)}
+              className={`px-4 py-3.5 rounded-lg border-2 font-bold flex items-center justify-center transition-colors ${
+                savedNames.has(viewRecipe.name.toLowerCase().trim())
+                  ? 'border-[var(--alert-red)] text-[var(--alert-red)] bg-[#FFE9E4]'
+                  : 'border-[var(--line)] text-[var(--ink)] bg-white'
+              }`}
+              aria-label="Save recipe"
+            >
+              <Heart size={20} className={savedNames.has(viewRecipe.name.toLowerCase().trim()) ? 'fill-[var(--alert-red)]' : ''} />
+            </button>
+            <button onClick={handleCooked} disabled={markingCooked} className="flex-1 discovery-btn-primary py-3.5 text-lg disabled:opacity-60">
+              {markingCooked ? 'Logging…' : '👨‍🍳 I cooked this'}
             </button>
           </div>
         </div>
