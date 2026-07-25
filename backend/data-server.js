@@ -542,12 +542,18 @@ function computeCommunity() {
 // ───────────────────────── Recipes via Gemini (Google AI Studio) ─────────────────────────
 const genAI = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 
-async function callGemini(promptText) {
+async function callGemini(promptText, opts = {}) {
   if (!genAI) throw new Error('GEMINI_API_KEY not set — using fallback');
   const response = await genAI.models.generateContent({
     model: GEMINI_MODEL,
     contents: promptText,
-    config: { responseMimeType: 'application/json', temperature: 0.6 },
+    config: {
+      responseMimeType: 'application/json',
+      // Higher temperature for recipe generation to force variety across calls;
+      // low temperature for classification tasks (opts.temperature=0.1).
+      temperature: opts.temperature ?? 0.9,
+      topP: 0.95,
+    },
   });
   const text = response.text || '';
   return JSON.parse(text.replace(/```json|```/g, '').trim());
@@ -567,17 +573,17 @@ async function categorizePantryItem(name) {
   ];
   // Rule-based first (fast + deterministic for well-known items)
   const n = name.toLowerCase();
-  if (/chocolate|sweet|candy|chips|crisp|soda|cola|fizzy|ice cream|cookie|biscuit|rusks?|cake|pastry/.test(n)) return 'Unhealthy foods';
-  if (/onion|garlic|tomato|spinach|carrot|pepper|fruit|vegetable|salad|lettuce|cucumber|potato|apple|banana|orange|grape|berry|mango|avocado|leek|celery|broccoli|cauliflower|kale|beet/.test(n)) return 'Fruit and vegetables';
-  if (/chicken|beef|fish|tuna|sardine|mince|steak|egg|ostrich|pork|lamb|mackerel|hake|snoek|prawn|pilchard/.test(n)) return 'Animal protein';
-  if (/yogurt|yoghurt|milk|cheese|cream|amasi|maas/.test(n)) return 'Dairy';
-  if (/samp|maize|couscous|rice|noodle|pasta|bulgar|buckwheat|oats|bread|quinoa|barley/.test(n)) return 'Whole grains and high-fibre starchy foods';
-  if (/bean|lentil|chickpea|split pea/.test(n)) return 'Legumes';
-  if (/oil|nut|seed|olive|almond|cashew|pecan|peanut/.test(n)) return 'Oils, nuts and seeds';
-  // Fall back to Gemini if enabled
+  if (/chocolate|sweet|candy|chips|crisp|soda|cola|fizzy|ice cream|cookie|biscuit|rusks?|cake|pastry|sugar|syrup|jam/.test(n)) return 'Unhealthy foods';
+  if (/onion|garlic|tomato|spinach|carrot|pepper|fruit|vegetable|veg\b|salad|lettuce|cucumber|potato|apple|banana|orange|grape|berry|mango|avocado|leek|celery|broccoli|cauliflower|kale|beet|morogo|greens|sweet potato|pumpkin|butternut|beetroot|marrow|squash/.test(n)) return 'Fruit and vegetables';
+  if (/chicken|beef|fish|tuna|sardine|mince|steak|egg|ostrich|pork|lamb|mackerel|hake|snoek|prawn|pilchard|mince|salami|ham|bacon|sausage|biltong/.test(n)) return 'Animal protein';
+  if (/yogurt|yoghurt|milk|cheese|cream|amasi|maas|butter/.test(n)) return 'Dairy';
+  if (/samp|maize|couscous|rice|noodle|pasta|bulgar|buckwheat|oats?|bread|quinoa|barley|wheat|flour|cereal|muesli|granola|wrap|tortilla|roti/.test(n)) return 'Whole grains and high-fibre starchy foods';
+  if (/bean|lentil|chickpea|split pea|tofu|tempeh|seitan|edamame|hummus/.test(n)) return 'Legumes';
+  if (/oil|nut|seed|olive|almond|cashew|pecan|peanut|walnut|pistachio|macadamia|hazelnut|pumpkin seed|sunflower/.test(n)) return 'Oils, nuts and seeds';
+  // Fall back to Gemini if enabled — low temperature for deterministic classification
   if (!genAI) return 'Fruit and vegetables';
   try {
-    const out = await callGemini(`Classify this pantry item into exactly ONE of these South African HealthyFood categories: ${CATEGORIES.join(' | ')}. Item: "${name}". Return strict JSON: {"category": "..."}. No preamble.`);
+    const out = await callGemini(`Classify this pantry item into exactly ONE of these South African HealthyFood categories: ${CATEGORIES.join(' | ')}. Item: "${name}". Return strict JSON: {"category": "..."}. No preamble.`, { temperature: 0.1 });
     const cat = out?.category;
     return CATEGORIES.includes(cat) ? cat : 'Fruit and vegetables';
   } catch (_) {
@@ -677,9 +683,12 @@ Return strict JSON format:
     }
   ]
 }
-Generate 6 diverse personalized recipes — vary cooking methods (bake, stir-fry, boil, no-cook, one-pot) and meal types (light, hearty, quick, slow) so the user has real choice. When the user's search names an ingredient (e.g. "chicken"), return several distinct dishes featuring that ingredient (soups, bowls, curries, salads, roasts).
-Only pantry ingredients (plus 1-2 common staples in missing_items if necessary).
-STEPS QUALITY: 5-8 steps per recipe. Each step is 1-2 sentences, includes specifics — heat level (medium / high), timing (e.g. "5 minutes until softened"), technique (stir, fold, baste), and visual cues (golden brown, aromatic, reduced by half). No vague steps like "cook until done". Start steps with an action verb.
+Generate 6 diverse personalized recipes — every recipe must be a DIFFERENT DISH with a DIFFERENT COOKING METHOD. Cover as many of these as fit the search: soup, curry, stir-fry, salad, roast, bake, one-pot stew, no-cook bowl, wrap, grain bowl.
+When the user's search names an ingredient (e.g. "chicken"), return distinct dishes featuring it — a chicken soup, chicken curry, chicken stir-fry, chicken salad, roast chicken — NOT the same dish with different names.
+Every recipe's ingredients, quantities and steps MUST match the actual dish. A curry needs curry powder + coconut milk + rice; a stir-fry needs high heat and soy sauce; a salad needs no cooking. Never repeat steps across recipes.
+Only use pantry ingredients (plus 1-2 common staples in missing_items if necessary).
+STEPS QUALITY: 5-8 steps per recipe. Each step 1-2 sentences with specifics — heat level, timing ("5 minutes until softened"), technique (stir, fold, baste), and visual cues (golden brown, aromatic, reduced by half). No vague steps like "cook until done". Start steps with an action verb.
+Variation seed (use to ensure recipes differ from any earlier call for this user): ${query.refresh || Date.now()}
 No preamble.`;
 
   const out = await callGemini(prompt);
@@ -914,119 +923,396 @@ app.get('/recipes/:customerId', async (req, res) => {
   }
 });
 
-function fallbackRecipes(cid, query = {}) {
-  const prefs = db.getPrefs(cid) || DB.prefs[cid] || defaultPrefs();
-  // Respect BOTH allergens and diet when choosing pantry basis
-  const pantry = computePantry(cid).items.filter(i => !i.allergen_conflict && !i.diet_conflict);
-  const names = pantry.map(i => i.name);
-  const has = (kw) => names.find(n => n.toLowerCase().includes(kw));
-  const userSearch = (query.search || query.q || '').trim().toLowerCase();
-
-  const recipes = [];
-
-  // Diet-safe defaults — used when the pantry doesn't have a diet-appropriate item
-  const dietDefaults = {
-    vegan:       { protein: 'Lentils',   dairy: null,          egg: null },
-    vegetarian:  { protein: 'Lentils',   dairy: 'Yoghurt',     egg: 'Eggs' },
-    pescatarian: { protein: 'Sardines',  dairy: 'Yoghurt',     egg: 'Eggs' },
-    halal:       { protein: 'Chicken',   dairy: 'Yoghurt',     egg: 'Eggs' },
-    banting:     { protein: 'Chicken',   dairy: 'Cheese',      egg: 'Eggs' },
-    diabetic:    { protein: 'Chicken',   dairy: 'Yoghurt',     egg: 'Eggs' },
-    none:        { protein: 'Chicken',   dairy: 'Yoghurt',     egg: 'Eggs' },
-    all:         { protein: 'Chicken',   dairy: 'Yoghurt',     egg: 'Eggs' },
-  };
-  const dd = dietDefaults[String(prefs.diet || 'none').toLowerCase()] || dietDefaults.none;
-
-  // Pick a diet-appropriate protein from pantry, else fall back to a safe default
-  const isVegan = prefs.diet === 'vegan';
-  const isVeggie = isVegan || prefs.diet === 'vegetarian';
-  const protein = (
-    (!isVeggie && (has('sardine') || has('fish') || has('ostrich') || has('chicken'))) ||
-    (!isVegan && has('egg')) ||
-    has('bean') || has('lentil') || has('chickpea') ||
-    (isVeggie ? dd.protein : (names[0] || dd.protein))
-  );
-  const grain = has('buckwheat') || has('samp') || has('maize') || has('couscous') || has('noodle') || has('bulgar') || has('rice') || (prefs.diet === 'banting' ? 'Cauliflower' : (names[1] || 'Wholewheat Couscous'));
-  const veg = has('vegetable') || has('tomato') || has('fruit') || has('spinach') || (names[2] || 'Fresh Vegetables');
-
-  if (userSearch.includes('soup') || userSearch.includes('stew') || userSearch.includes('warm')) {
-    recipes.push(mkRecipe(`Pantry ${capitalize(userSearch)} with ${veg}`, ['⏳ Long cook', 35], [veg, grain, 'Tinned Tomatoes'], 'Immunity boosting warm meal using your pantry items.', true));
-    recipes.push(mkRecipe(`Hearty ${grain} & ${veg} Pot`, ['🔥 Gas-friendly', 25], [veg, 'Tinned Tomatoes', grain], 'Slow-release energy with deep South African flavors.', false));
-    recipes.push(mkRecipe(`Zero-Waste ${protein} Soup`, ['⚡ Quick', 20], [protein, veg, 'Plain Dried Herbs'], 'Reduces food waste while delivering complete protein.', true));
-  } else if (userSearch.includes('protein') || userSearch.includes('workout') || userSearch.includes('muscle')) {
-    recipes.push(mkRecipe(`High-Protein ${protein} & ${grain} Bowl`, ['⚡ Quick', 15], [protein, grain, veg], 'High Omega-3s and lean protein for muscle recovery.', true));
-    recipes.push(mkRecipe(`Searing ${protein} & ${veg} Skillet`, ['⚡ Quick', 12], [protein, veg, 'Olive Oil'], 'Low-carb, high-protein meal made from your pantry.', false));
-    recipes.push(mkRecipe(`Power ${grain} & ${protein} Salad`, ['❄ No-cook', 10], [protein, grain, veg], 'Nutrient dense energy meal packed with iron.', true));
-  } else if (userSearch) {
-    const s = capitalize(userSearch);
-    recipes.push(mkRecipe(`Pantry ${s} with ${protein}`, ['⚡ Quick', 15], [protein, grain, veg], `Custom AI recipe for ${userSearch} using your pantry.`, true));
-    recipes.push(mkRecipe(`Savory ${s} Medley`, ['🔥 Gas-friendly', 20], [grain, veg, 'Olive Oil'], `Pantry staples reworked around ${userSearch}.`, false));
-    recipes.push(mkRecipe(`Quick ${veg} & ${protein} Stir-Fry`, ['⚡ Quick', 10], [protein, veg], `Fast healthy meal customized to your available items.`, true));
-    recipes.push(mkRecipe(`${s} Bowl with ${grain}`, ['⚡ Quick', 12], [protein, grain, veg], `A bowl-style ${userSearch} dish balancing protein and slow carbs.`, false));
-    recipes.push(mkRecipe(`Hearty ${s} & ${grain} Pot`, ['⏳ Long cook', 40], [protein, grain, veg, 'Tinned Tomatoes'], `Slow-cooked ${userSearch} for comfort and depth of flavor.`, true));
-    recipes.push(mkRecipe(`Zesty ${s} & ${veg} Salad`, ['❄ No-cook', 8], [veg, protein, 'Olive Oil'], `Light, no-cook ${userSearch} salad — perfect quick lunch.`, false));
-    recipes.push(mkRecipe(`Roast ${s} with ${veg}`, ['🔥 Oven', 35], [protein, veg, 'Olive Oil'], `A more traditional ${userSearch} roast, uses items you have.`, false));
-  } else {
-    recipes.push(mkRecipe(`${protein} & ${veg} with ${grain}`, ['⚡ Quick', 15], [protein, grain, veg, 'Olive Oil'], 'High in protein and Omega-3s using your pantry items.', true));
-    recipes.push(mkRecipe(`Hearty ${veg} & ${grain} Stew`, ['⏳ Long cook', 45], [grain, veg, 'Tinned Tomatoes'], 'Rich in fibre and antioxidants with zero waste.', false));
-    recipes.push(mkRecipe(`Fresh Fruit & ${grain} Breakfast Bowl`, ['❄ No-cook', 5], ['Fresh Fruit', grain], 'Vitamins and complex carbs from your pantry to start your day.', false));
-    recipes.push(mkRecipe(`One-pot ${protein} & ${grain}`, ['🔥 One-pot', 25], [protein, grain, veg], 'Weeknight one-pot — minimal washing up, maximum nutrition.', false));
-    recipes.push(mkRecipe(`${veg} & ${grain} Wrap`, ['⚡ Quick', 8], [veg, grain, 'Olive Oil'], 'Quick lunch wrap with what you have on hand.', false));
-    recipes.push(mkRecipe(`Zero-waste ${protein} bake`, ['🔥 Oven', 30], [protein, veg, 'Tinned Tomatoes'], 'Baked and forgiving — uses items before they turn.', true));
-  }
-
-  const wantedMax = userSearch ? 8 : 6;
-  // Filter out anything that violates the user's diet
-  return { recipes: recipes.filter(r => dietCompatible(r, prefs.diet)).slice(0, wantedMax) };
-}
-
 function capitalize(s) {
-  return s.charAt(0).toUpperCase() + s.slice(1);
+  return String(s || '').charAt(0).toUpperCase() + String(s || '').slice(1);
 }
 
-function mkRecipe(name, [method, mins], ingredientNames, benefit, expiring) {
-  const ingredients = ingredientNames.map(n => ({ name: typeof n === 'string' ? n : n.name, amount: '1 portion' }));
-  const first = ingredients[0]?.name || 'main ingredient';
-  const second = ingredients[1]?.name || 'accompaniment';
-  const rest = ingredients.slice(2).map(i => i.name).join(', ') || 'remaining pantry items';
-  const isQuick = mins <= 15;
-  const isNoCook = /No[- ]cook/i.test(method);
+// ───── Recipe templates ─────
+// Each template is a real dish (soup, curry, stir-fry, salad, roast, stew, bowl, wrap)
+// with dish-appropriate ingredients, quantities and steps. Templates take the user's
+// main protein / grain / veg (already diet-safe) and produce a coherent recipe.
 
-  const steps = isNoCook ? [
-    `Wash and roughly chop ${first} and ${second} into bite-sized pieces — about the size of a R2 coin.`,
-    `Combine the chopped ${first}, ${second} and ${rest} in a large mixing bowl.`,
-    `Drizzle with 1 tablespoon of olive oil and squeeze over half a lemon (or a splash of vinegar). Toss gently for even coverage.`,
-    `Season with sea salt, black pepper, and any fresh or dried herbs you have — build flavor a pinch at a time and taste.`,
-    `Let the mixture rest for 3-5 minutes so the flavors marry before serving.`,
-    `Plate up and finish with a final crack of pepper. Serves ${4}.`,
-  ] : [
-    `Prep your ingredients first: chop ${first} into even bite-sized pieces, slice ${second} thinly, and set the rest (${rest}) within arm's reach.`,
-    `Warm 1 tablespoon of oil in a heavy pan over medium heat until it shimmers — about 60 seconds.`,
-    `Add ${first} and cook for ${Math.max(4, Math.floor(mins / 4))} minutes, stirring occasionally, until it starts to color at the edges and smells fragrant.`,
-    `Stir in ${second} and the remaining ${rest}. Season with salt, pepper, and any spices you have (a teaspoon of paprika or curry powder lifts most pantry dishes).`,
-    `Add a splash of water or stock (about 100ml), cover, and simmer on low for ${isQuick ? Math.max(4, mins - 5) : Math.max(10, mins - 10)} minutes so the flavors deepen. Stir once halfway through.`,
-    `Taste and adjust seasoning — a squeeze of lemon at the end brightens everything. If it looks dry, add a splash more water; if too wet, uncover for the last 2 minutes.`,
-    `Rest off the heat for 2 minutes, then plate up and serve while warm. Serves ${4}.`,
+function tSoup(p, g, v) {
+  const name = `Hearty ${capitalize(p)} & ${capitalize(v)} Soup`;
+  const ingredients = [
+    { name: 'Onion',              amount: '1 medium, diced' },
+    { name: 'Garlic',              amount: '3 cloves, minced' },
+    { name: p,                     amount: '300g' },
+    { name: v,                     amount: '2 cups, chopped' },
+    { name: 'Vegetable stock',     amount: '1 litre' },
+    { name: g,                     amount: '½ cup (optional, for body)' },
+    { name: 'Bay leaf',            amount: '1' },
+    { name: 'Olive oil',           amount: '1 tbsp' },
   ];
+  const steps = [
+    `Dice 1 medium onion, mince 3 cloves of garlic, and chop ${v} into small even pieces so they cook uniformly.`,
+    `Heat 1 tbsp olive oil in a large soup pot over medium heat until it shimmers, about 60 seconds.`,
+    `Add the onion and cook for 4-5 minutes, stirring occasionally, until translucent and soft.`,
+    `Stir in the garlic and cook 30 seconds until fragrant — don't let it brown or it turns bitter.`,
+    `Add the ${p} and cook 3-4 minutes, stirring, so it picks up flavor from the aromatics.`,
+    `Pour in 1 litre of vegetable stock, add the ${v}, bay leaf and ${g}. Bring to a boil then reduce to a gentle simmer.`,
+    `Cover partially and simmer for 20 minutes, stirring every 5-6 minutes, until the ${v} is tender and the broth is fragrant.`,
+    `Remove the bay leaf, taste and season with salt and pepper. Ladle into bowls and serve hot with bread or over ${g}.`,
+  ];
+  return mkStructured(name, ingredients, steps, {
+    method: '⏳ Simmer', minutes: 30, calories: 320, savings: 45,
+    missing_items: [
+      { name: 'Vegetable stock', retailer: 'Checkers', is_healthyfood: false },
+      { name: 'Bay leaf', retailer: 'Checkers', is_healthyfood: false },
+    ],
+    benefit: `Warming, hydrating and gentle on the stomach — the slow simmer draws out nutrients from ${v}. Great for cold days or when you're feeling run down.`,
+    expiring: true, tags: ['healthyfood', 'immune-boost'],
+  });
+}
 
+function tCurry(p, g, v) {
+  const name = `${capitalize(p)} Curry`;
+  const ingredients = [
+    { name: 'Onion',              amount: '1 large, sliced thinly' },
+    { name: 'Ginger',              amount: '2cm, grated' },
+    { name: 'Garlic',              amount: '3 cloves, minced' },
+    { name: 'Curry powder',        amount: '2 tbsp' },
+    { name: 'Ground cumin',        amount: '1 tsp' },
+    { name: p,                     amount: '400g' },
+    { name: 'Tinned tomatoes',     amount: '1 tin (400g)' },
+    { name: 'Coconut milk',        amount: '1 tin (400ml)' },
+    { name: v,                     amount: '1 cup, chopped' },
+    { name: g,                     amount: '1 cup, to serve' },
+    { name: 'Olive oil',           amount: '2 tbsp' },
+  ];
+  const steps = [
+    `Slice 1 large onion thinly, grate 2cm ginger and mince 3 cloves of garlic. Keep them separate.`,
+    `Heat 2 tbsp oil in a wide pan over medium-high heat. Add onion and cook 5 minutes until soft and starting to color at the edges.`,
+    `Stir in ginger and garlic. Cook 30 seconds until aromatic.`,
+    `Add 2 tbsp curry powder and 1 tsp ground cumin. Cook 1 minute — this "blooms" the spices in the oil and unlocks their flavor. It will smell fragrant.`,
+    `Add the ${p} and toss to coat in the spice paste. Cook 3-4 minutes until sealed on all sides.`,
+    `Pour in the tin of tomatoes (crush any whole ones with a spoon) and the coconut milk. Stir to combine, bring to a gentle bubble.`,
+    `Add the ${v}, reduce heat to low, cover partially and simmer 20 minutes until the sauce has thickened and the ${p} is tender. Stir every 5 minutes.`,
+    `Meanwhile, cook the ${g} according to its package (usually 12-15 minutes in salted boiling water).`,
+    `Taste the curry, adjust salt, and finish with a squeeze of lemon. Serve over the ${g}, garnished with fresh coriander if you have it.`,
+  ];
+  return mkStructured(name, ingredients, steps, {
+    method: '🔥 Simmer', minutes: 40, calories: 450, savings: 55,
+    missing_items: [
+      { name: 'Curry powder', retailer: 'Checkers', is_healthyfood: false },
+      { name: 'Coconut milk', retailer: 'Checkers', is_healthyfood: false },
+      { name: 'Ginger', retailer: 'Checkers', is_healthyfood: false },
+    ],
+    benefit: `Turmeric in curry powder is anti-inflammatory. Combined with ${p} for protein and ${g} for slow-release carbs, this is balanced comfort food.`,
+    expiring: false, tags: ['healthyfood', 'anti-inflammatory'],
+  });
+}
+
+function tStirFry(p, g, v) {
+  const name = `Quick ${capitalize(p)} & ${capitalize(v)} Stir-Fry`;
+  const ingredients = [
+    { name: p,                     amount: '300g, thinly sliced' },
+    { name: v,                     amount: '2 cups, cut into strips' },
+    { name: 'Garlic',              amount: '2 cloves, minced' },
+    { name: 'Ginger',              amount: '1cm, grated' },
+    { name: 'Soy sauce',           amount: '2 tbsp' },
+    { name: 'Sesame oil',          amount: '1 tsp (optional)' },
+    { name: g,                     amount: '1 cup, cooked' },
+    { name: 'Olive oil',           amount: '1 tbsp' },
+  ];
+  const steps = [
+    `Prep everything BEFORE you start cooking — stir-fries move fast. Slice ${p} into thin strips, cut ${v} into similar-sized strips, mince garlic and ginger.`,
+    `Cook the ${g} first per its instructions and set aside.`,
+    `Heat a wok or wide pan over HIGH heat until it starts smoking slightly, about 90 seconds. Add 1 tbsp oil and swirl.`,
+    `Add the ${p} and stir constantly for 3-4 minutes until browned on the outside but still tender.`,
+    `Push the ${p} to the side, add the garlic and ginger to the empty space and cook 30 seconds until aromatic.`,
+    `Add the ${v} strips. Toss everything together and stir-fry 2-3 minutes — you want the ${v} still crisp with some color, not soft.`,
+    `Pour in 2 tbsp soy sauce and 1 tsp sesame oil if using. Toss once more so everything is glossy and coated.`,
+    `Remove from heat immediately (residual heat will overcook it). Spoon over the ${g}, top with sesame seeds or spring onion if you have them.`,
+  ];
+  return mkStructured(name, ingredients, steps, {
+    method: '⚡ High heat', minutes: 15, calories: 380, savings: 40,
+    missing_items: [
+      { name: 'Soy sauce', retailer: 'Checkers', is_healthyfood: false },
+    ],
+    benefit: `High heat locks in nutrients and preserves the crunch of ${v}. Fast, colorful and packed with protein.`,
+    expiring: true, tags: ['healthyfood', 'quick'],
+  });
+}
+
+function tSalad(p, g, v) {
+  const name = `Fresh ${capitalize(p)} & ${capitalize(v)} Salad`;
+  const ingredients = [
+    { name: v,                     amount: '3 cups, washed and torn' },
+    { name: p,                     amount: '200g (cooked or tinned)' },
+    { name: g,                     amount: '½ cup, cooked and cooled' },
+    { name: 'Olive oil',           amount: '3 tbsp' },
+    { name: 'Lemon juice',         amount: '1 tbsp (or vinegar)' },
+    { name: 'Dijon mustard',       amount: '1 tsp (optional)' },
+    { name: 'Salt & pepper',       amount: 'to taste' },
+  ];
+  const steps = [
+    `Wash the ${v} thoroughly and dry well — wet leaves dilute the dressing. Tear into bite-sized pieces.`,
+    `Cook the ${g} per package if not already done, then rinse under cold water to stop the cooking and cool it down.`,
+    `If ${p} needs cooking, poach or pan-sear now and let cool for 5 minutes before slicing.`,
+    `In a small jar, combine 3 tbsp olive oil, 1 tbsp lemon juice, 1 tsp mustard, a pinch of salt and pepper. Screw on the lid and shake vigorously until emulsified.`,
+    `In a large bowl, layer the ${v} first, then the cooled ${g}, then the ${p} on top.`,
+    `Drizzle 2/3 of the dressing over and toss gently — over-dressing makes it soggy. Save the rest to top up before serving.`,
+    `Taste — add more salt, a fresh crack of pepper, or a squeeze more lemon if it needs brightening.`,
+    `Serve immediately for the crispest texture. Any leftovers keep in the fridge for a day, undressed.`,
+  ];
+  return mkStructured(name, ingredients, steps, {
+    method: '❄ No-cook', minutes: 12, calories: 340, savings: 35,
+    missing_items: [],
+    benefit: `Raw ${v} keeps its vitamin C and folate intact. Add ${p} for satiety without heaviness — perfect quick lunch.`,
+    expiring: true, tags: ['healthyfood', 'raw', 'quick'],
+  });
+}
+
+function tRoast(p, g, v) {
+  const name = `Roast ${capitalize(p)} with ${capitalize(v)}`;
+  const ingredients = [
+    { name: p,                     amount: '500g, whole or in large pieces' },
+    { name: v,                     amount: '3 cups, in chunks' },
+    { name: 'Olive oil',           amount: '3 tbsp' },
+    { name: 'Garlic',              amount: '4 cloves, peeled' },
+    { name: 'Dried herbs',         amount: '1 tsp (thyme / rosemary / oregano)' },
+    { name: 'Lemon',               amount: '½, sliced' },
+    { name: g,                     amount: '1 cup, to serve' },
+    { name: 'Salt & pepper',       amount: 'to taste' },
+  ];
+  const steps = [
+    `Preheat the oven to 200°C (fan 180°C). Pull out a roasting tray large enough that everything sits in a single layer — crowding steams instead of roasting.`,
+    `Cut ${v} into similar-sized chunks (about 3cm) so they cook evenly.`,
+    `Pat the ${p} dry with kitchen paper — dry surface = better browning.`,
+    `In the tray, toss ${v} with 2 tbsp olive oil, salt and pepper. Push to one side.`,
+    `Rub the ${p} with 1 tbsp olive oil, salt, pepper and 1 tsp dried herbs. Nestle it into the tray with the whole garlic cloves and lemon slices tucked around.`,
+    `Roast 25-30 minutes, giving the ${v} a stir halfway through. The ${p} is done when it's golden and cooked through (juices run clear for meat, or flakes easily for fish).`,
+    `Meanwhile prepare the ${g} on the stovetop per its instructions.`,
+    `Rest the roasted ${p} for 5 minutes before slicing — this keeps it juicy. Serve on top of ${g} with the roasted ${v} and pan juices spooned over.`,
+  ];
+  return mkStructured(name, ingredients, steps, {
+    method: '🔥 Oven', minutes: 35, calories: 480, savings: 60,
+    missing_items: [
+      { name: 'Dried herbs', retailer: 'Checkers', is_healthyfood: false },
+    ],
+    benefit: `Roasting concentrates flavor without added fat — you get depth and satisfaction with just olive oil and herbs.`,
+    expiring: false, tags: ['healthyfood', 'oven'],
+  });
+}
+
+function tStew(p, g, v) {
+  const name = `One-Pot ${capitalize(p)} Stew`;
+  const ingredients = [
+    { name: 'Onion',              amount: '1 large, diced' },
+    { name: 'Garlic',              amount: '3 cloves, minced' },
+    { name: p,                     amount: '400g' },
+    { name: 'Tinned tomatoes',     amount: '1 tin (400g)' },
+    { name: v,                     amount: '2 cups, chopped' },
+    { name: g,                     amount: '½ cup' },
+    { name: 'Paprika',             amount: '1 tsp (smoked if you have it)' },
+    { name: 'Vegetable stock',     amount: '500ml' },
+    { name: 'Olive oil',           amount: '2 tbsp' },
+  ];
+  const steps = [
+    `Dice 1 large onion, mince 3 cloves of garlic, and chop ${v} into large chunks so they hold up during long cooking.`,
+    `Heat 2 tbsp oil in a heavy pot over medium heat. Add the onion and cook 5-6 minutes until soft and lightly golden.`,
+    `Stir in the garlic and 1 tsp paprika. Cook 30 seconds until fragrant.`,
+    `Add the ${p} and brown on all sides — about 4-5 minutes. Don't rush this: browning builds the base flavor.`,
+    `Tip in the tin of tomatoes and 500ml stock. Scrape the bottom of the pot to release the browned bits (that's flavor).`,
+    `Add the ${v} and ${g}, season with salt and pepper. Bring to a boil then reduce to the lowest simmer.`,
+    `Cover and cook for 45-50 minutes, stirring gently every 15 minutes. The stew is done when the ${p} pulls apart easily and the sauce has thickened.`,
+    `Taste and adjust seasoning. Rest 5 minutes off heat, then ladle into bowls. Even better the next day.`,
+  ];
+  return mkStructured(name, ingredients, steps, {
+    method: '⏳ Slow-cook', minutes: 60, calories: 460, savings: 55,
+    missing_items: [
+      { name: 'Vegetable stock', retailer: 'Checkers', is_healthyfood: false },
+      { name: 'Smoked paprika', retailer: 'Checkers', is_healthyfood: false },
+    ],
+    benefit: `Slow cooking breaks down tougher cuts of ${p} and lets flavors deepen — comfort food that's also budget-friendly.`,
+    expiring: true, tags: ['healthyfood', 'batch-cook'],
+  });
+}
+
+function tBowl(p, g, v) {
+  const name = `${capitalize(p)} & ${capitalize(g)} Power Bowl`;
+  const ingredients = [
+    { name: g,                     amount: '1 cup, cooked' },
+    { name: p,                     amount: '200g' },
+    { name: v,                     amount: '2 cups, mix raw + cooked' },
+    { name: 'Olive oil',           amount: '2 tbsp' },
+    { name: 'Lemon',               amount: '½' },
+    { name: 'Tahini or yoghurt',   amount: '2 tbsp (optional dressing)' },
+    { name: 'Seeds',               amount: '1 tbsp (pumpkin / sunflower)' },
+  ];
+  const steps = [
+    `Cook ${g} first — it needs the longest time. Follow the package (usually 12-15 min in salted boiling water). Set aside covered.`,
+    `While ${g} cooks, prep the ${v}: keep half raw (thinly sliced for crunch) and roast or sauté the other half with a splash of oil for 6-8 minutes until tender.`,
+    `Cook the ${p}: pan-sear over medium-high heat with 1 tbsp oil for 4-5 minutes per side (adjust to protein type) until cooked through. Rest 3 minutes then slice.`,
+    `Make a quick dressing: whisk 2 tbsp tahini or yoghurt with the juice of ½ lemon and 1 tbsp olive oil. Add water 1 tsp at a time until it pours smoothly.`,
+    `Assemble each bowl: warm ${g} on the bottom, then arrange the cooked ${v} on one side, raw ${v} on the other, and ${p} in the middle.`,
+    `Drizzle generously with the dressing.`,
+    `Sprinkle 1 tbsp seeds over the top for crunch and healthy fats.`,
+    `Serve immediately while ${g} is still warm. Bowls keep well and reheat beautifully next day (dressing on the side).`,
+  ];
+  return mkStructured(name, ingredients, steps, {
+    method: '⚡ Quick', minutes: 20, calories: 520, savings: 45,
+    missing_items: [
+      { name: 'Tahini', retailer: 'Checkers', is_healthyfood: true },
+      { name: 'Seeds mix', retailer: 'Checkers', is_healthyfood: true },
+    ],
+    benefit: `Bowls are the easiest way to hit all your macros in one meal: complex carbs from ${g}, complete protein from ${p}, and vitamins from ${v}.`,
+    expiring: false, tags: ['healthyfood', 'balanced'],
+  });
+}
+
+function tWrap(p, g, v) {
+  const name = `Quick ${capitalize(p)} Wrap`;
+  const ingredients = [
+    { name: 'Whole-wheat wraps',   amount: '2 large' },
+    { name: p,                     amount: '200g, cooked and sliced' },
+    { name: v,                     amount: '1 cup, thinly sliced' },
+    { name: 'Yoghurt or hummus',   amount: '3 tbsp' },
+    { name: 'Lemon',               amount: '¼' },
+    { name: 'Fresh herbs',         amount: '2 tbsp (mint / coriander)' },
+    { name: 'Salt & pepper',       amount: 'to taste' },
+  ];
+  const steps = [
+    `Warm the wraps briefly — 15 seconds in a dry pan or 8 seconds in the microwave. Cold wraps crack; warm ones fold like silk.`,
+    `Slice ${p} into thin, even strips so it distributes evenly across the wrap.`,
+    `Thinly slice or shred the ${v} — thin cuts pack more flavor per bite.`,
+    `Squeeze ¼ lemon over the ${v} and season with a pinch of salt. This quick pickle brightens everything.`,
+    `Spread 1.5 tbsp yoghurt or hummus down the centre of each wrap, leaving a 3cm border.`,
+    `Layer the ${p}, then the ${v} on top of the spread. Scatter the fresh herbs over.`,
+    `Fold the bottom of the wrap up over the filling, then fold in both sides and roll away from you tightly.`,
+    `Cut in half at a diagonal (looks better) and serve. Pack in cling film for lunches.`,
+  ];
+  return mkStructured(name, ingredients, steps, {
+    method: '⚡ No-cook (if p is cooked)', minutes: 10, calories: 380, savings: 30,
+    missing_items: [
+      { name: 'Whole-wheat wraps', retailer: 'Checkers', is_healthyfood: true },
+    ],
+    benefit: `Portable and fibre-rich. Whole-wheat wraps give you slow-release carbs so you don't crash mid-afternoon.`,
+    expiring: false, tags: ['healthyfood', 'lunch'],
+  });
+}
+
+// The registry: name → builder. Order here also sets our "default" 6.
+const RECIPE_TEMPLATES = {
+  soup:    tSoup,
+  curry:   tCurry,
+  stirfry: tStirFry,
+  salad:   tSalad,
+  roast:   tRoast,
+  stew:    tStew,
+  bowl:    tBowl,
+  wrap:    tWrap,
+};
+
+// Given a user search, pick which templates to run and in what order.
+function pickTemplates(search) {
+  const s = String(search || '').toLowerCase();
+  if (s.includes('soup')) return ['soup', 'stew', 'curry', 'bowl'];
+  if (s.includes('curry')) return ['curry', 'stew', 'bowl', 'wrap'];
+  if (s.includes('stew')) return ['stew', 'soup', 'curry', 'roast'];
+  if (s.includes('salad') || s.includes('cold')) return ['salad', 'bowl', 'wrap'];
+  if (s.includes('stir') || s.includes('quick')) return ['stirfry', 'bowl', 'wrap', 'salad'];
+  if (s.includes('roast') || s.includes('bake') || s.includes('oven')) return ['roast', 'stew', 'bowl'];
+  if (s.includes('bowl')) return ['bowl', 'salad', 'stirfry', 'wrap'];
+  if (s.includes('wrap') || s.includes('sandwich') || s.includes('lunch')) return ['wrap', 'salad', 'bowl'];
+  // Default: a spread across dish types so the list looks varied
+  return ['stirfry', 'curry', 'soup', 'bowl', 'salad', 'roast', 'stew', 'wrap'];
+}
+
+// Shared shape assembler so every template returns the same schema.
+function mkStructured(name, ingredients, steps, opts) {
   return {
     name,
     photo: photoForRecipe(name, ingredients),
-    prep_time_category: `${mins} Min Meals`,
-    cook_time_minutes: mins,
-    cooking_method: method,
-    diet_tags: ['halal', 'healthyfood'],
-    all_in_pantry: true,
-    missing_items: [],
+    prep_time_category: `${opts.minutes} Min Meals`,
+    cook_time_minutes: opts.minutes,
+    cooking_method: opts.method,
+    diet_tags: opts.tags || ['halal', 'healthyfood'],
+    all_in_pantry: (opts.missing_items || []).length === 0,
+    missing_items: opts.missing_items || [],
     ingredients,
-    health_benefit: benefit,
+    health_benefit: opts.benefit,
     allergy_safe: true,
-    uses_expiring: expiring,
+    uses_expiring: !!opts.expiring,
     servings: 4,
-    calories: 380,
-    budget_savings_rand: 35,
+    calories: opts.calories,
+    budget_savings_rand: opts.savings,
     steps,
   };
+}
+
+function fallbackRecipes(cid, query = {}) {
+  const prefs = db.getPrefs(cid) || DB.prefs[cid] || defaultPrefs();
+  const pantry = computePantry(cid).items.filter(i => !i.allergen_conflict && !i.diet_conflict);
+  const names = pantry.map(i => i.name);
+  const has = (kw) => names.find(n => n.toLowerCase().includes(kw));
+  const userSearch = String(query.search || query.q || '').trim().toLowerCase();
+
+  // Diet-safe default main ingredient — respects vegan / vegetarian / etc.
+  const isVegan = prefs.diet === 'vegan';
+  const isVeggie = isVegan || prefs.diet === 'vegetarian';
+  const isBanting = prefs.diet === 'banting';
+
+  const proteinDefault = isVegan ? 'Lentils'
+                        : isVeggie ? 'Chickpeas'
+                        : 'Chicken';
+  const grainDefault = isBanting ? 'Cauliflower rice'
+                    : 'Wholewheat Couscous';
+  const vegDefault = 'Fresh Vegetables';
+
+  // If the user searched for a specific ingredient, prefer that as the main.
+  const searchIngredient = detectIngredientInSearch(userSearch, prefs.diet);
+
+  const protein = searchIngredient
+    || (!isVeggie && (has('sardine') || has('fish') || has('ostrich') || has('chicken')))
+    || (!isVegan && has('egg'))
+    || has('bean') || has('lentil') || has('chickpea') || has('tofu')
+    || proteinDefault;
+
+  const grain = has('buckwheat') || has('samp') || has('maize') || has('couscous')
+             || has('noodle') || has('bulgar') || has('rice')
+             || grainDefault;
+
+  const veg = has('vegetable') || has('tomato') || has('spinach') || has('carrot') || vegDefault;
+
+  // Pick which templates to build based on the search
+  const templateOrder = pickTemplates(userSearch);
+
+  const recipes = templateOrder
+    .map(tn => {
+      try { return RECIPE_TEMPLATES[tn](protein, grain, veg); }
+      catch (_) { return null; }
+    })
+    .filter(Boolean)
+    .filter(r => dietCompatible(r, prefs.diet));
+
+  const wantedMax = userSearch ? 8 : 6;
+  return { recipes: recipes.slice(0, wantedMax) };
+}
+
+// Given the user's search, if it names an actual food (chicken / beef / lentil / etc.)
+// return that as the ingredient — with respect to their diet.
+function detectIngredientInSearch(search, diet) {
+  if (!search) return null;
+  const s = search.toLowerCase();
+  const dietForbidden = DIET_FORBIDDEN[String(diet || '').toLowerCase()];
+  const CANDIDATES = [
+    'chicken', 'beef', 'lamb', 'pork', 'ostrich',
+    'tuna', 'sardine', 'fish', 'salmon', 'hake', 'snoek',
+    'lentil', 'chickpea', 'bean', 'tofu', 'tempeh',
+    'egg', 'cheese', 'yoghurt',
+    'rice', 'pasta', 'noodle', 'samp', 'couscous', 'quinoa',
+    'spinach', 'broccoli', 'cauliflower', 'pumpkin', 'butternut',
+  ];
+  for (const c of CANDIDATES) {
+    if (s.includes(c)) {
+      // Skip if this ingredient is forbidden by the user's diet
+      if (dietForbidden && dietForbidden.test(c)) continue;
+      return capitalize(c);
+    }
+  }
+  return null;
 }
 
 
