@@ -1,7 +1,10 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { Profile } from '../types';
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
+import axios from 'axios';
+import { Profile, Preferences } from '../types';
 import { getProfile } from '../api';
 import { useAuth } from './AuthContext';
+
+const API_URL = (import.meta as any).env?.VITE_API_URL || 'https://api.example.com';
 
 interface ToastMessage {
   id: number;
@@ -46,8 +49,21 @@ export const ProfileProvider: React.FC<{ children: ReactNode }> = ({ children })
     refreshProfile();
   }, [user?.customer_id]);
 
+  // Debounced background save of preferences to the backend
+  const saveTimer = useRef<number | null>(null);
+  const savePreferences = (prefs: Preferences) => {
+    if (!user?.customer_id) return;
+    if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      axios.put(`${API_URL}/profile/${user.customer_id}/preferences`, prefs)
+        .catch(err => console.warn('savePreferences failed', err));
+    }, 300);
+  };
+
   const updateProfile = (updated: Profile) => {
     setProfile(updated);
+    // If preferences changed, persist to the DB
+    if (updated?.preferences) savePreferences(updated.preferences);
   };
 
   const addToast = (message: string) => {

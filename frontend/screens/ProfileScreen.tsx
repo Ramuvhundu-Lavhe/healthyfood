@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useProfile } from '../context/ProfileContext';
-import { ShieldCheck, ChevronDown, ChevronUp, Info, Settings, Activity, Check, Leaf, Beef, WheatOff } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { ShieldCheck, ChevronDown, ChevronUp, Info, Settings, Activity, Check, Leaf, Beef, WheatOff, LogOut } from 'lucide-react';
 
 const ALLERGY_OPTIONS = ['nuts', 'dairy', 'gluten', 'shellfish', 'eggs', 'soy'];
 
@@ -14,6 +15,7 @@ const DIET_OPTIONS = [
 
 const ProfileScreen: React.FC = () => {
   const { profile, updateProfile, addToast } = useProfile();
+  const { user, logout } = useAuth();
   const [showInfo, setShowInfo] = useState(false);
   
   if (!profile) return null;
@@ -235,6 +237,19 @@ const ProfileScreen: React.FC = () => {
               </div>
             </div>
           )}
+        </div>
+
+        {/* Account section */}
+        <div className="discovery-card">
+          <p className="text-xs uppercase tracking-wide font-bold text-[var(--ink-muted)] mb-2">Account</p>
+          <p className="text-sm text-[var(--ink)]">Signed in as <span className="font-bold">{user?.name || user?.username}</span></p>
+          <p className="text-[11px] text-[var(--ink-muted)] mt-0.5">{user?.customer_id}</p>
+          <button
+            onClick={() => { addToast('Logged out'); logout(); }}
+            className="mt-3 w-full flex items-center justify-center bg-[var(--bg)] hover:bg-[#FFE9E4] text-[var(--alert-red)] font-bold py-2.5 rounded-lg text-sm transition-colors"
+          >
+            <LogOut size={16} className="mr-2" /> Log out
+          </button>
         </div>
       </div>
     </div>

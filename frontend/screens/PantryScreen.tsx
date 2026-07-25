@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import { getPantry } from '../api';
+import React, { useEffect, useState, useRef } from 'react';
+import { getPantry, addPantryItem, categorizePantryItem } from '../api';
 import { PantryItem } from '../types';
 import { useProfile } from '../context/ProfileContext';
-import { AlertTriangle, Plus, ChevronRight, Camera, RefreshCw, ShieldAlert, X, Search } from 'lucide-react';
+import { AlertTriangle, Plus, ChevronRight, Camera, RefreshCw, ShieldAlert, X, Search, CheckCircle, Tag } from 'lucide-react';
 
 interface PantryScreenProps {
   onNavigateToRecipes: () => void;
@@ -14,7 +14,10 @@ const PantryScreen: React.FC<PantryScreenProps> = ({ onNavigateToRecipes }) => {
   const [loading, setLoading] = useState(true);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [manualInput, setManualInput] = useState('');
+  const [previewCategory, setPreviewCategory] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const categorizeTimer = useRef<number | null>(null);
 
   useEffect(() => {
     if (!profile) return;
@@ -26,29 +29,44 @@ const PantryScreen: React.FC<PantryScreenProps> = ({ onNavigateToRecipes }) => {
     loadData();
   }, [profile]);
 
+  // Live-classify as the user types (debounced)
+  useEffect(() => {
+    if (categorizeTimer.current) window.clearTimeout(categorizeTimer.current);
+    if (manualInput.trim().length < 3) {
+      setPreviewCategory(null);
+      return;
+    }
+    categorizeTimer.current = window.setTimeout(async () => {
+      const res = await categorizePantryItem(manualInput.trim());
+      setPreviewCategory(res.category);
+    }, 400);
+    return () => { if (categorizeTimer.current) window.clearTimeout(categorizeTimer.current); };
+  }, [manualInput]);
+
   if (loading || !profile) return <div className="p-6 text-[var(--ink-muted)] font-medium">Loading pantry...</div>;
 
   const handleScan = () => {
     setShowAddMenu(false);
-    addToast("Till slip scanned — 6 items extracted ✓");
+    addToast("Till slip scanning — coming soon");
   };
 
-  const handleManualAdd = (e: React.FormEvent) => {
+  const handleManualAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!manualInput.trim()) return;
-    
-    const newItem: PantryItem = {
-      name: manualInput,
-      category: 'Other',
-      is_healthy: true,
-      is_healthyfood: false,
-      days_until_expiry: 14,
-      photo: 'https://images.unsplash.com/photo-1584473457406-6240486418e9?w=800&q=80' // Generic pantry photo
-    };
-    
-    setItems([newItem, ...items]);
-    setManualInput('');
-    addToast(`${manualInput} added to pantry`);
+    const name = manualInput.trim();
+    if (!name || !profile || adding) return;
+    setAdding(true);
+    try {
+      const data = await addPantryItem(profile.customer_id, name, previewCategory || undefined);
+      setItems(data.items);
+      setManualInput('');
+      setPreviewCategory(null);
+      setShowAddMenu(false);
+      addToast(`${name} added to pantry`);
+    } catch (err) {
+      addToast('Could not add — please try again');
+    } finally {
+      setAdding(false);
+    }
   };
 
   // Filter and Group Items
@@ -208,17 +226,23 @@ const PantryScreen: React.FC<PantryScreenProps> = ({ onNavigateToRecipes }) => {
                   <p className="font-bold text-[var(--ink)] text-sm">Type manually</p>
                 </div>
                 <div className="flex mt-2">
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={manualInput}
                     onChange={(e) => setManualInput(e.target.value)}
-                    placeholder="e.g. Apples" 
+                    placeholder="e.g. Apples, chicken breast, oats"
                     className="flex-1 bg-[var(--bg)] border border-[var(--line)] rounded-l-lg px-3 py-2 text-sm outline-none focus:border-[var(--teal)]"
                   />
-                  <button type="submit" className="bg-[var(--navy)] text-white px-4 py-2 rounded-r-lg font-bold text-sm">
-                    Add
+                  <button type="submit" disabled={adding || !manualInput.trim()} className="bg-[var(--navy)] text-white px-4 py-2 rounded-r-lg font-bold text-sm disabled:opacity-50">
+                    {adding ? '...' : 'Add'}
                   </button>
                 </div>
+                {previewCategory && (
+                  <div className="mt-2 flex items-center text-[11px] text-[var(--ink-muted)]">
+                    <Tag size={11} className="mr-1 text-[var(--teal)]" />
+                    Auto-categorised as <span className="font-bold text-[var(--navy)] ml-1">{previewCategory}</span>
+                  </div>
+                )}
               </form>
             </div>
           </div>

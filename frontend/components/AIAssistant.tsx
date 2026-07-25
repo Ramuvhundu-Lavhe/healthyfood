@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI } from '@google/genai';
-import { MessageSquare, X, Send, Bot, User, Sparkles, Clock, Users, CheckCircle, ShoppingCart, ChefHat, Flame } from 'lucide-react';
+import { MessageSquare, X, Send, Bot, User, Sparkles, Clock, Users, CheckCircle, ShoppingCart, ChefHat, Flame, ThumbsUp, ThumbsDown, Check } from 'lucide-react';
 import { useProfile } from '../context/ProfileContext';
 import { Recipe } from '../types';
-import { getRecipes } from '../api';
+import { getRecipes, recordCooked, recordReview } from '../api';
 
 interface Message {
   id: string;
@@ -20,7 +20,23 @@ function isRecipeIntent(text: string): boolean {
   return RECIPE_INTENT.test(text);
 }
 
-const RecipeChatCard: React.FC<{ recipe: Recipe }> = ({ recipe }) => (
+const RecipeChatCard: React.FC<{ recipe: Recipe; customerId: string; onToast: (msg: string) => void }> = ({ recipe, customerId, onToast }) => {
+  const [cooked, setCooked] = useState(false);
+  const [rating, setRating] = useState<0 | 1 | -1>(0);
+
+  const markCooked = async () => {
+    setCooked(true);
+    onToast(`Nice — logged "${recipe.name}" as cooked`);
+    await recordCooked(customerId, recipe.name, recipe.ingredients.map(i => i.name));
+  };
+
+  const submitRating = async (r: 1 | -1) => {
+    setRating(r);
+    onToast(r > 0 ? 'Thanks — we\'ll suggest more like this' : 'Got it — you\'ll see less like this');
+    await recordReview(customerId, recipe.name, r);
+  };
+
+  return (
   <div className="mt-3 bg-white border border-[var(--line)] rounded-2xl overflow-hidden shadow-sm">
     <div className="relative h-32 w-full bg-[var(--bg)]">
       <img
@@ -96,12 +112,49 @@ const RecipeChatCard: React.FC<{ recipe: Recipe }> = ({ recipe }) => (
           ))}
         </ol>
       </details>
+
+      {/* Cooked + Review actions */}
+      <div className="mt-3 pt-3 border-t border-[var(--line)]">
+        {!cooked ? (
+          <button
+            onClick={markCooked}
+            className="w-full bg-[var(--navy)] text-white font-bold py-2 rounded-lg text-xs flex items-center justify-center"
+          >
+            <Check size={14} className="mr-1.5" /> I cooked this
+          </button>
+        ) : rating === 0 ? (
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-[var(--ink-muted)]">How was it?</span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => submitRating(1)}
+                className="p-1.5 bg-[#E8F3ED] rounded-lg text-[var(--healthy-green)] hover:bg-[var(--healthy-green)] hover:text-white transition-colors"
+                aria-label="Liked it"
+              >
+                <ThumbsUp size={14} />
+              </button>
+              <button
+                onClick={() => submitRating(-1)}
+                className="p-1.5 bg-[#FFE9E4] rounded-lg text-[var(--alert-red)] hover:bg-[var(--alert-red)] hover:text-white transition-colors"
+                aria-label="Didn't like it"
+              >
+                <ThumbsDown size={14} />
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="text-[11px] text-[var(--ink-muted)] text-center">
+            {rating > 0 ? '✓ We\'ll suggest more like this' : '✓ You\'ll see less like this'}
+          </p>
+        )}
+      </div>
     </div>
   </div>
-);
+  );
+};
 
 const AIAssistant: React.FC = () => {
-  const { isAIOpen, closeAI, openAI, aiInitialMessage, profile } = useProfile();
+  const { isAIOpen, closeAI, openAI, aiInitialMessage, profile, addToast } = useProfile();
   const [messages, setMessages] = useState<Message[]>([
     { id: '1', role: 'model', text: "Hi! I'm your HealthyFood Companion. Ask me to build a recipe from your pantry — try \"quick dinner\", \"sardine bowl\", or \"something with samp\"." }
   ]);
@@ -246,8 +299,8 @@ const AIAssistant: React.FC = () => {
                     : 'bg-white text-[var(--ink)] border border-[var(--line)] rounded-tl-sm'
                 }`}>
                   <div>{msg.text}</div>
-                  {msg.recipes && msg.recipes.map((r, idx) => (
-                    <RecipeChatCard key={idx} recipe={r} />
+                  {msg.recipes && profile && msg.recipes.map((r, idx) => (
+                    <RecipeChatCard key={idx} recipe={r} customerId={profile.customer_id} onToast={addToast} />
                   ))}
                 </div>
               </div>
