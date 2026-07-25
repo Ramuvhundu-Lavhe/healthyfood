@@ -16,13 +16,46 @@ jobs:
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script_stop: true
-          command_timeout: 10m
+          command_timeout: 15m
           script: |
             set -e
+            echo "==> [1/7] Ensuring 2G swap exists (e2-small has 2G RAM, vite build needs headroom)..."
+            if [ ! -f /swapfile ]; then
+              sudo fallocate -l 2G /swapfile
+              sudo chmod 600 /swapfile
+              sudo mkswap /swapfile
+              sudo swapon /swapfile
+              echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+              echo "    swap created."
+            else
+              echo "    swap already present."
+            fi
+            free -h
+
+            echo "==> [2/7] Pulling latest from GitHub..."
             cd ~/healthyfood
-            git pull origin main
-            cd backend && npm install --omit=dev && cd ..
-            cd frontend && npm install && npm run build && cd ..
-            pm2 restart healthyfood-api --update-env
+            git fetch --all
+            git reset --hard origin/main
+            git log --oneline -1
+
+            echo "==> [3/7] Installing backend deps..."
+            cd backend
+            npm install --omit=dev --no-audit --no-fund
+            cd ..
+
+            echo "==> [4/7] Installing frontend deps..."
+            cd frontend
+            npm install --no-audit --no-fund
+
+            echo "==> [5/7] Building frontend (Node heap capped at 1536MB)..."
+            NODE_OPTIONS='--max-old-space-size=1536' npm run build
+
+            echo "==> [6/7] Restarting backend via PM2..."
+            cd ..
+            pm2 restart healthyfood-api --update-env || pm2 start backend/data-server.js --name healthyfood-api
             pm2 save
+
+            echo "==> [7/7] Smoke test..."
+            sleep 2
+            curl -s -o /dev/null -w '    /api/health status: %{http_code}\n' http://127.0.0.1:5001/health || true
             echo "Deploy OK at $(date -u)"
