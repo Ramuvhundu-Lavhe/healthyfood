@@ -31,7 +31,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
       <div className="bg-gradient-to-b from-[var(--navy-deep)] to-[var(--navy)] pt-12 pb-8 px-6 rounded-b-3xl shadow-md">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <p className="text-[var(--navy-tint)] text-sm font-medium opacity-80">Good morning,</p>
+            <p className="text-[var(--navy-tint)] text-sm font-medium opacity-80">Welcome back,</p>
             <h1 className="text-2xl font-bold text-white">
               {profile.name.split(' ')[0]}
             </h1>
