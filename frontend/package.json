@@ -1,0 +1,25 @@
+{
+  "name": "healthyfood-companion-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@google/genai": "latest",
+    "axios": "latest",
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "recharts": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@vitejs/plugin-react": "^6.0.4",
+    "typescript": "latest",
+    "vite": "^8.1.5"
+  }
+}

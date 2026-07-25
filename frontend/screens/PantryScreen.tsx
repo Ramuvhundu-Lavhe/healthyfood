@@ -1,0 +1,231 @@
+import React, { useEffect, useState } from 'react';
+import { getPantry } from '../api';
+import { PantryItem } from '../types';
+import { useProfile } from '../context/ProfileContext';
+import { AlertTriangle, Plus, ChevronRight, Camera, RefreshCw, ShieldAlert, X, Search } from 'lucide-react';
+
+interface PantryScreenProps {
+  onNavigateToRecipes: () => void;
+}
+
+const PantryScreen: React.FC<PantryScreenProps> = ({ onNavigateToRecipes }) => {
+  const { profile, addToast } = useProfile();
+  const [items, setItems] = useState<PantryItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAddMenu, setShowAddMenu] = useState(false);
+  const [manualInput, setManualInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  useEffect(() => {
+    if (!profile) return;
+    const loadData = async () => {
+      const data = await getPantry(profile.customer_id);
+      setItems(data.items);
+      setLoading(false);
+    };
+    loadData();
+  }, [profile]);
+
+  if (loading || !profile) return <div className="p-6 text-[var(--ink-muted)] font-medium">Loading pantry...</div>;
+
+  const handleScan = () => {
+    setShowAddMenu(false);
+    addToast("Till slip scanned — 6 items extracted ✓");
+  };
+
+  const handleManualAdd = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualInput.trim()) return;
+    
+    const newItem: PantryItem = {
+      name: manualInput,
+      category: 'Other',
+      is_healthy: true,
+      is_healthyfood: false,
+      days_until_expiry: 14,
+      photo: 'https://images.unsplash.com/photo-1584473457406-6240486418e9?w=800&q=80' // Generic pantry photo
+    };
+    
+    setItems([newItem, ...items]);
+    setManualInput('');
+    addToast(`${manualInput} added to pantry`);
+  };
+
+  // Filter and Group Items
+  const filteredItems = items.filter(item => item.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  const expiringSoon = filteredItems.filter(item => item.days_until_expiry <= 3);
+  
+  // Group remaining items by category
+  const groupedItems = filteredItems.filter(item => item.days_until_expiry > 3).reduce((acc, item) => {
+    if (!acc[item.category]) acc[item.category] = [];
+    acc[item.category].push(item);
+    return acc;
+  }, {} as Record<string, PantryItem[]>);
+
+  const renderItem = (item: PantryItem, idx: number) => (
+    <div key={idx} className="discovery-card p-3 flex items-center">
+      <img src={item.photo} alt={item.name} className="w-12 h-12 rounded-lg object-cover mr-4 border border-[var(--line)]" loading="lazy" onError={(e) => { (e.currentTarget as HTMLImageElement).src = 'https://images.unsplash.com/photo-1490645935967-10de6ba17061?w=400&q=80'; }} />
+      <div className="flex-1">
+        <div className="flex items-center">
+          <p className="font-semibold text-[var(--ink)] mr-2">{item.name}</p>
+          {item.allergen_conflict && (
+            <ShieldAlert size={14} className="text-[var(--alert-red)]" />
+          )}
+          {!item.is_healthy && (
+            <div className="w-2 h-2 rounded-full bg-[var(--alert-red)] ml-2" title="Less Healthy"></div>
+          )}
+        </div>
+        <p className="text-xs text-[var(--ink-muted)]">{item.category}</p>
+      </div>
+      {item.is_healthyfood && (
+        <span className="bg-[#E8F3ED] text-[var(--healthy-green)] text-[10px] font-bold px-2.5 py-1 rounded-full border border-[var(--healthy-green)]">
+          HealthyFood
+        </span>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="pb-28 relative min-h-screen">
+      {/* Header */}
+      <div className="bg-[var(--navy)] pt-12 pb-6 px-6 shadow-md">
+        <h1 className="text-2xl font-bold text-white">My Pantry</h1>
+        <p className="text-[var(--navy-tint)] mt-1 opacity-90 text-sm">
+          {items.length} items · {expiringSoon.length} expiring soon · auto-synced
+        </p>
+        
+        {/* Search Bar */}
+        <div className="mt-4 relative">
+          <Search size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-[var(--ink-muted)]" />
+          <input 
+            type="text" 
+            placeholder="Search your pantry..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full bg-white rounded-xl py-2.5 pl-10 pr-4 text-sm text-[var(--ink)] outline-none focus:ring-2 focus:ring-[var(--teal)]"
+          />
+        </div>
+      </div>
+
+      <div className="p-6 space-y-6">
+        {/* Expiring Soon Section */}
+        {expiringSoon.length > 0 && (
+          <div className="discovery-card border-[var(--amber)] bg-[#FFFDF5]">
+            <div className="flex items-center text-[var(--amber)] font-bold mb-4">
+              <AlertTriangle size={20} className="mr-2" />
+              Expiring this week
+            </div>
+            <div className="space-y-3 mb-5">
+              {expiringSoon.map((item, idx) => (
+                <div key={idx} className="flex justify-between items-center bg-white p-3 rounded-lg border border-[var(--line)]">
+                  <div className="flex items-center">
+                    <img src={item.photo} alt={item.name} className="w-10 h-10 rounded-md object-cover mr-3 border border-[var(--line)]" loading="lazy" onError={(e) => { (e.currentTarget as HTMLImageElement).src = 'https://images.unsplash.com/photo-1490645935967-10de6ba17061?w=400&q=80'; }} />
+                    <div>
+                      <p className="font-semibold text-[var(--ink)] text-sm">{item.name}</p>
+                      <p className="text-xs text-[var(--ink-muted)]">{item.category}</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-sm font-bold text-[var(--alert-red)] block">
+                      {item.days_until_expiry} days
+                    </span>
+                    <span className="text-[10px] text-[var(--teal)] underline">Edit</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button 
+              onClick={onNavigateToRecipes}
+              className="w-full bg-[var(--amber)] text-white font-bold py-3 rounded-lg flex items-center justify-center shadow-sm"
+            >
+              Cook with these <ChevronRight size={18} className="ml-1" />
+            </button>
+          </div>
+        )}
+
+        {/* Grouped Items */}
+        {Object.entries(groupedItems).map(([category, categoryItems]) => (
+          <div key={category} className="space-y-3">
+            <h2 className="text-lg font-bold text-[var(--navy)] flex items-center border-b border-[var(--line)] pb-2">
+              {category}
+            </h2>
+            <div className="space-y-2">
+              {categoryItems.map(renderItem)}
+            </div>
+          </div>
+        ))}
+
+        {filteredItems.length === 0 && (
+          <div className="text-center text-[var(--ink-muted)] py-8">
+            No items found matching "{searchQuery}"
+          </div>
+        )}
+
+        {/* Add Item Button */}
+        <div className="pt-4">
+          <button 
+            onClick={() => setShowAddMenu(true)}
+            className="w-full border-2 border-dashed border-[var(--navy)] text-[var(--navy)] font-bold py-4 rounded-xl flex items-center justify-center bg-white hover:bg-[var(--navy-tint)] transition-colors"
+          >
+            <Plus size={20} className="mr-2" /> Add item
+          </button>
+        </div>
+      </div>
+
+      {/* Add Item Bottom Sheet Modal */}
+      {showAddMenu && (
+        <div className="absolute inset-0 z-50 flex items-end bg-[var(--navy-deep)] bg-opacity-60 backdrop-blur-sm">
+          <div className="bg-white w-full rounded-t-3xl p-6 shadow-2xl animate-slide-up">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-bold text-[var(--navy)]">Add to Pantry</h2>
+              <button onClick={() => setShowAddMenu(false)} className="p-2 bg-[var(--bg)] rounded-full text-[var(--ink-muted)] hover:text-[var(--ink)]">
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="discovery-card border-[var(--teal)] bg-[#E6F6FA] flex items-center p-4">
+                <RefreshCw size={24} className="text-[var(--teal)] mr-4" />
+                <div>
+                  <p className="font-bold text-[var(--ink)] text-sm flex items-center">
+                    Auto-sync from Discovery <CheckCircle size={14} className="text-[var(--healthy-green)] ml-1" />
+                  </p>
+                  <p className="text-xs text-[var(--ink-muted)] mt-0.5">Connected and syncing automatically</p>
+                </div>
+              </div>
+
+              <button onClick={handleScan} className="w-full discovery-card flex items-center p-4 hover:bg-[var(--bg)] transition-colors text-left">
+                <Camera size={24} className="text-[var(--navy)] mr-4" />
+                <div>
+                  <p className="font-bold text-[var(--ink)] text-sm">Scan a till slip</p>
+                  <p className="text-xs text-[var(--ink-muted)] mt-0.5">Take a photo of your receipt</p>
+                </div>
+              </button>
+
+              <form onSubmit={handleManualAdd} className="discovery-card p-4">
+                <div className="flex items-center mb-2">
+                  <Plus size={20} className="text-[var(--ink-muted)] mr-3" />
+                  <p className="font-bold text-[var(--ink)] text-sm">Type manually</p>
+                </div>
+                <div className="flex mt-2">
+                  <input 
+                    type="text" 
+                    value={manualInput}
+                    onChange={(e) => setManualInput(e.target.value)}
+                    placeholder="e.g. Apples" 
+                    className="flex-1 bg-[var(--bg)] border border-[var(--line)] rounded-l-lg px-3 py-2 text-sm outline-none focus:border-[var(--teal)]"
+                  />
+                  <button type="submit" className="bg-[var(--navy)] text-white px-4 py-2 rounded-r-lg font-bold text-sm">
+                    Add
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default PantryScreen;

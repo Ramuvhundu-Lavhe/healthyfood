@@ -1,0 +1,19 @@
+# dependencies
+node_modules/
+**/node_modules/
+
+# build output
+dist/
+**/dist/
+
+# secrets / local env
+.env.local
+**/.env.local
+*.pem
+
+# logs
+npm-debug.log*
+*.log
+
+# os
+.DS_Store
