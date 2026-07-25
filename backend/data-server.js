@@ -668,7 +668,7 @@ Return strict JSON format:
       "photo": "",
       "prep_time_category": "15 Min Quick Meals",
       "cook_time_minutes": 15,
-      "cooking_method": "⚡ Quick",
+      "cooking_method": "Quick",
       "diet_tags": ["pescatarian", "halal"],
       "all_in_pantry": true,
       "missing_items": [],
@@ -693,21 +693,52 @@ No preamble.`;
 
   const out = await callGemini(prompt);
   const dislikedLower = new Set(disliked.map(d => d.toLowerCase()));
-  const recipes = (out.recipes || []).map(r => ({
-    ...r,
-    photo: photoForRecipe(r.name, r.ingredients),
-  })).filter(r => {
-    // Hard allergen re-check on the AI output
-    const text = JSON.stringify(r).toLowerCase();
-    if (prefs.allergies.some(a => a && text.includes(a.toLowerCase()))) return false;
-    // Hard diet re-check — vegan users NEVER see meat/fish/dairy etc.
+  const allergiesLower = (prefs.allergies || []).map(a => String(a).toLowerCase()).filter(Boolean);
+
+  const recipes = (out.recipes || []).map(r => {
+    // Compute which of the user's allergens appear in this recipe
+    const allergenWarnings = computeAllergenWarnings(r, allergiesLower);
+    return {
+      ...r,
+      photo: photoForRecipe(r.name, r.ingredients),
+      allergen_warnings: allergenWarnings,
+      allergy_safe: allergenWarnings.length === 0,
+    };
+  }).filter(r => {
+    // Diet remains a HARD filter (vegan users never see beef)
     if (!dietCompatible(r, prefs.diet)) return false;
-    // Exclude anything that matches a previously disliked recipe by name
+    // Skip explicitly disliked recipes
     if (dislikedLower.has(String(r.name).toLowerCase())) return false;
     return true;
   });
   if (!recipes.length) throw new Error('no safe recipes generated');
   return { recipes };
+}
+
+// Returns the list of user-allergen terms that appear in the recipe's ingredients / name / steps.
+// Used to render red warning banners on the frontend rather than hiding the recipe.
+function computeAllergenWarnings(recipe, allergiesLower) {
+  if (!Array.isArray(allergiesLower) || allergiesLower.length === 0) return [];
+  const parts = [
+    recipe.name || '',
+    (recipe.ingredients || []).map(i => (typeof i === 'string' ? i : i.name || '')).join(' '),
+    (recipe.missing_items || []).map(i => (typeof i === 'string' ? i : i.name || '')).join(' '),
+    (recipe.steps || []).join(' '),
+  ].join(' ').toLowerCase();
+  const found = new Set();
+  for (const a of allergiesLower) {
+    // Whole-word or substring match — err on the safe side
+    if (parts.includes(a)) found.add(a);
+    // Expand named allergen groups
+    if (a === 'nuts' && /\b(peanut|almond|cashew|walnut|pecan|pistachio|hazelnut|macadamia)\b/.test(parts)) found.add(a);
+    if (a === 'shellfish' && /\b(prawn|shrimp|mussel|crab|lobster|calamari|oyster|clam)\b/.test(parts)) found.add(a);
+    if ((a === 'fish' || a === 'seafood') && /\b(sardine|pilchard|tuna|mackerel|hake|snoek|salmon|anchovy)\b/.test(parts)) found.add(a);
+    if (a === 'dairy' && /\b(milk|cheese|yog(h)?urt|cream|butter|whey|casein)\b/.test(parts)) found.add(a);
+    if (a === 'gluten' && /\b(wheat|bread|pasta|flour|barley|couscous|bulgar)\b/.test(parts)) found.add(a);
+    if (a === 'eggs' && /\begg\b/.test(parts)) found.add(a);
+    if (a === 'soy' && /\b(soy|soya|tofu|edamame|tempeh)\b/.test(parts)) found.add(a);
+  }
+  return [...found];
 }
 
 // ───────────────────────── Auth (persistent) ─────────────────────────
@@ -955,7 +986,7 @@ function tSoup(p, g, v) {
     `Remove the bay leaf, taste and season with salt and pepper. Ladle into bowls and serve hot with bread or over ${g}.`,
   ];
   return mkStructured(name, ingredients, steps, {
-    method: '⏳ Simmer', minutes: 30, calories: 320, savings: 45,
+    method: 'Simmer', minutes: 30, calories: 320, savings: 45,
     missing_items: [
       { name: 'Vegetable stock', retailer: 'Checkers', is_healthyfood: false },
       { name: 'Bay leaf', retailer: 'Checkers', is_healthyfood: false },
@@ -992,7 +1023,7 @@ function tCurry(p, g, v) {
     `Taste the curry, adjust salt, and finish with a squeeze of lemon. Serve over the ${g}, garnished with fresh coriander if you have it.`,
   ];
   return mkStructured(name, ingredients, steps, {
-    method: '🔥 Simmer', minutes: 40, calories: 450, savings: 55,
+    method: 'Simmer', minutes: 40, calories: 450, savings: 55,
     missing_items: [
       { name: 'Curry powder', retailer: 'Checkers', is_healthyfood: false },
       { name: 'Coconut milk', retailer: 'Checkers', is_healthyfood: false },
@@ -1026,7 +1057,7 @@ function tStirFry(p, g, v) {
     `Remove from heat immediately (residual heat will overcook it). Spoon over the ${g}, top with sesame seeds or spring onion if you have them.`,
   ];
   return mkStructured(name, ingredients, steps, {
-    method: '⚡ High heat', minutes: 15, calories: 380, savings: 40,
+    method: 'High heat', minutes: 15, calories: 380, savings: 40,
     missing_items: [
       { name: 'Soy sauce', retailer: 'Checkers', is_healthyfood: false },
     ],
@@ -1057,7 +1088,7 @@ function tSalad(p, g, v) {
     `Serve immediately for the crispest texture. Any leftovers keep in the fridge for a day, undressed.`,
   ];
   return mkStructured(name, ingredients, steps, {
-    method: '❄ No-cook', minutes: 12, calories: 340, savings: 35,
+    method: 'No-cook', minutes: 12, calories: 340, savings: 35,
     missing_items: [],
     benefit: `Raw ${v} keeps its vitamin C and folate intact. Add ${p} for satiety without heaviness — perfect quick lunch.`,
     expiring: true, tags: ['healthyfood', 'raw', 'quick'],
@@ -1087,7 +1118,7 @@ function tRoast(p, g, v) {
     `Rest the roasted ${p} for 5 minutes before slicing — this keeps it juicy. Serve on top of ${g} with the roasted ${v} and pan juices spooned over.`,
   ];
   return mkStructured(name, ingredients, steps, {
-    method: '🔥 Oven', minutes: 35, calories: 480, savings: 60,
+    method: 'Oven', minutes: 35, calories: 480, savings: 60,
     missing_items: [
       { name: 'Dried herbs', retailer: 'Checkers', is_healthyfood: false },
     ],
@@ -1120,7 +1151,7 @@ function tStew(p, g, v) {
     `Taste and adjust seasoning. Rest 5 minutes off heat, then ladle into bowls. Even better the next day.`,
   ];
   return mkStructured(name, ingredients, steps, {
-    method: '⏳ Slow-cook', minutes: 60, calories: 460, savings: 55,
+    method: 'Slow-cook', minutes: 60, calories: 460, savings: 55,
     missing_items: [
       { name: 'Vegetable stock', retailer: 'Checkers', is_healthyfood: false },
       { name: 'Smoked paprika', retailer: 'Checkers', is_healthyfood: false },
@@ -1152,7 +1183,7 @@ function tBowl(p, g, v) {
     `Serve immediately while ${g} is still warm. Bowls keep well and reheat beautifully next day (dressing on the side).`,
   ];
   return mkStructured(name, ingredients, steps, {
-    method: '⚡ Quick', minutes: 20, calories: 520, savings: 45,
+    method: 'Quick', minutes: 20, calories: 520, savings: 45,
     missing_items: [
       { name: 'Tahini', retailer: 'Checkers', is_healthyfood: true },
       { name: 'Seeds mix', retailer: 'Checkers', is_healthyfood: true },
@@ -1184,7 +1215,7 @@ function tWrap(p, g, v) {
     `Cut in half at a diagonal (looks better) and serve. Pack in cling film for lunches.`,
   ];
   return mkStructured(name, ingredients, steps, {
-    method: '⚡ No-cook (if p is cooked)', minutes: 10, calories: 380, savings: 30,
+    method: 'No-cook', minutes: 10, calories: 380, savings: 30,
     missing_items: [
       { name: 'Whole-wheat wraps', retailer: 'Checkers', is_healthyfood: true },
     ],

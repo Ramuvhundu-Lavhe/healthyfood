@@ -72,6 +72,9 @@ export interface Recipe {
   ingredients: RecipeIngredient[];
   health_benefit: string;
   allergy_safe: boolean;
+  /** Which of the user's registered allergens appear in this recipe. Populated
+   *  by the backend so the frontend can render a red warning banner. */
+  allergen_warnings?: string[];
   uses_expiring: boolean;
   servings: number;
   calories: number;

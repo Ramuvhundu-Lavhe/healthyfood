@@ -15,6 +15,25 @@ function ingredientInPantry(ingName: string, pantryNames: string[]): boolean {
   });
 }
 
+// Check whether this ingredient triggers any of the user's allergies. Handles
+// the named allergen groups (nuts / shellfish / fish / dairy / gluten / soy / eggs).
+function ingredientAllergen(ingName: string, allergies: string[]): string | null {
+  const n = String(ingName || '').toLowerCase();
+  for (const a of allergies) {
+    const al = a.toLowerCase().trim();
+    if (!al) continue;
+    if (n.includes(al)) return a;
+    if (al === 'nuts' && /peanut|almond|cashew|walnut|pecan|pistachio|hazelnut|macadamia/.test(n)) return a;
+    if (al === 'shellfish' && /prawn|shrimp|mussel|crab|lobster|calamari|oyster|clam/.test(n)) return a;
+    if ((al === 'fish' || al === 'seafood') && /sardine|pilchard|tuna|mackerel|hake|snoek|salmon|anchovy/.test(n)) return a;
+    if (al === 'dairy' && /milk|cheese|yog(h)?urt|cream|butter|whey|casein/.test(n)) return a;
+    if (al === 'gluten' && /wheat|bread|pasta|flour|barley|couscous|bulgar/.test(n)) return a;
+    if (al === 'eggs' && /\begg\b/.test(n)) return a;
+    if (al === 'soy' && /soy|soya|tofu|edamame|tempeh/.test(n)) return a;
+  }
+  return null;
+}
+
 const SkeletonRecipeCard: React.FC = () => (
   <div className="discovery-card overflow-hidden p-0 animate-pulse">
     <div className="h-44 w-full bg-[var(--line)]/60" />
@@ -39,7 +58,7 @@ const RecipesScreen: React.FC = () => {
   const [pantryNames, setPantryNames] = useState<string[]>([]);
   const [viewingSaved, setViewingSaved] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [agentStatus, setAgentStatus] = useState("🔍 AI Agent searching web & matching pantry...");
+  const [agentStatus, setAgentStatus] = useState("Building recipes from your pantry...");
   const [searchQuery, setSearchQuery] = useState("");
   const [activeSearchTerm, setActiveSearchTerm] = useState("");
   const [selectedMissing, setSelectedMissing] = useState<Recipe | null>(null);
@@ -152,7 +171,7 @@ const RecipesScreen: React.FC = () => {
     setMarkingCooked(true);
     try {
       await recordCooked(profile.customer_id, viewRecipe.name, viewRecipe.ingredients.map(i => i.name));
-      addToast("Marked as cooked — future recipes will lean this way 🎉");
+      addToast("Marked as cooked — future recipes will lean this way");
     } finally {
       setMarkingCooked(false);
       setViewRecipe(null);
@@ -390,6 +409,19 @@ const RecipesScreen: React.FC = () => {
                   </div>
                   
                   <div className="p-4 space-y-3 flex-1 flex flex-col">
+                    {/* ALLERGEN WARNING — most urgent, sits above the title */}
+                    {recipe.allergen_warnings && recipe.allergen_warnings.length > 0 && (
+                      <div className="bg-[#FFE9E4] border-2 border-[var(--alert-red)] rounded-lg p-2.5 flex items-start">
+                        <AlertTriangle size={16} className="text-[var(--alert-red)] mr-2 mt-0.5 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[11px] font-bold text-[var(--alert-red)] uppercase tracking-wider">Allergy warning</p>
+                          <p className="text-xs text-[var(--ink)] mt-0.5">
+                            Contains <span className="font-bold text-[var(--alert-red)]">{recipe.allergen_warnings.join(', ')}</span> — you flagged this in your profile.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
                     <div>
                       <h3 className="font-bold text-[var(--navy)] text-lg leading-tight mb-2">{recipe.name}</h3>
                       <div className="flex flex-wrap gap-2">
@@ -433,8 +465,8 @@ const RecipesScreen: React.FC = () => {
                       "{recipe.health_benefit}"
                     </p>
 
-                    {/* Allergen Safety */}
-                    {recipe.allergy_safe && profile.preferences.allergies.length > 0 && (
+                    {/* Allergen Safety (green when clear) */}
+                    {recipe.allergy_safe && profile.preferences.allergies.length > 0 && (!recipe.allergen_warnings || recipe.allergen_warnings.length === 0) && (
                       <div className="flex items-center text-[var(--healthy-green)] text-xs font-medium">
                         <ShieldCheck size={14} className="mr-1" /> Safe for your allergies
                       </div>
@@ -519,13 +551,23 @@ const RecipesScreen: React.FC = () => {
           
           <div className="flex-1 overflow-y-auto p-6 pb-28">
             <h2 className="text-2xl font-bold text-[var(--navy)] mb-2">{viewRecipe.name}</h2>
-            <div className="flex items-center text-[var(--ink-muted)] text-sm font-medium mb-6">
-              <Clock size={16} className="mr-1" /> {viewRecipe.cook_time_minutes} mins
-              <span className="mx-3">•</span>
+            <div className="flex items-center flex-wrap text-[var(--ink-muted)] text-sm font-medium mb-4 gap-x-3 gap-y-1">
+              <span className="flex items-center"><Clock size={16} className="mr-1" /> {viewRecipe.cook_time_minutes} mins</span>
               <span className="uppercase tracking-wider text-xs">{viewRecipe.cooking_method}</span>
-              <span className="mx-3">•</span>
-              <Flame size={14} className="text-[var(--alert-red)] mr-1" /> {viewRecipe.calories} kcal
+              <span className="flex items-center"><Flame size={14} className="text-[var(--alert-red)] mr-1" /> {viewRecipe.calories} kcal</span>
             </div>
+
+            {viewRecipe.allergen_warnings && viewRecipe.allergen_warnings.length > 0 && (
+              <div className="bg-[#FFE9E4] border-2 border-[var(--alert-red)] rounded-xl p-3 mb-6 flex items-start">
+                <AlertTriangle size={20} className="text-[var(--alert-red)] mr-2 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-xs font-bold text-[var(--alert-red)] uppercase tracking-wider">Contains your allergens</p>
+                  <p className="text-sm text-[var(--ink)] mt-0.5">
+                    This recipe includes <span className="font-bold text-[var(--alert-red)]">{viewRecipe.allergen_warnings.join(', ')}</span>. Individual ingredients are flagged in the list below.
+                  </p>
+                </div>
+              </div>
+            )}
 
             <div className="flex items-center justify-between bg-[var(--bg)] p-4 rounded-xl mb-8 border border-[var(--line)]">
               <span className="font-bold text-[var(--ink)]">Servings</span>
@@ -547,25 +589,36 @@ const RecipesScreen: React.FC = () => {
             <ul className="space-y-3 mb-8">
               {viewRecipe.ingredients.map((ing, idx) => {
                 const inPantry = ingredientInPantry(ing.name, pantryNames);
+                const allergen = ingredientAllergen(ing.name, profile?.preferences.allergies || []);
+                const isAlert = !inPantry || !!allergen;
                 return (
                   <li key={idx} className={`flex flex-col p-3 rounded-lg border ${
-                    inPantry
-                      ? 'bg-[var(--bg)] border-[var(--line)]'
-                      : 'bg-[#FFE9E4] border-[var(--alert-red)]/40'
+                    allergen
+                      ? 'bg-[#FFE9E4] border-2 border-[var(--alert-red)]'
+                      : !inPantry
+                        ? 'bg-[#FFE9E4] border-[var(--alert-red)]/40'
+                        : 'bg-[var(--bg)] border-[var(--line)]'
                   }`}>
-                    <div className="flex justify-between items-center">
-                      <div className="flex items-center">
-                        {inPantry
-                          ? <CheckCircle size={16} className="text-[var(--healthy-green)] mr-2 flex-shrink-0" />
-                          : <AlertCircle size={16} className="text-[var(--alert-red)] mr-2 flex-shrink-0" />}
-                        <div>
-                          <span className={`font-bold ${inPantry ? 'text-[var(--ink)]' : 'text-[var(--alert-red)]'}`}>{ing.amount}</span>
-                          <span className={`ml-2 ${inPantry ? 'text-[var(--ink)]' : 'text-[var(--alert-red)] font-semibold'}`}>{ing.name}</span>
+                    <div className="flex justify-between items-center gap-2">
+                      <div className="flex items-center min-w-0">
+                        {isAlert
+                          ? <AlertCircle size={16} className="text-[var(--alert-red)] mr-2 flex-shrink-0" />
+                          : <CheckCircle size={16} className="text-[var(--healthy-green)] mr-2 flex-shrink-0" />}
+                        <div className="min-w-0">
+                          <span className={`font-bold ${isAlert ? 'text-[var(--alert-red)]' : 'text-[var(--ink)]'}`}>{ing.amount}</span>
+                          <span className={`ml-2 ${isAlert ? 'text-[var(--alert-red)] font-semibold' : 'text-[var(--ink)]'}`}>{ing.name}</span>
                         </div>
                       </div>
-                      {!inPantry && (
-                        <span className="text-[10px] font-bold bg-[var(--alert-red)] text-white px-2 py-0.5 rounded">BUY</span>
-                      )}
+                      <div className="flex flex-shrink-0 gap-1">
+                        {allergen && (
+                          <span className="text-[10px] font-bold bg-[var(--alert-red)] text-white px-2 py-0.5 rounded uppercase tracking-wider">
+                            {allergen} allergen
+                          </span>
+                        )}
+                        {!inPantry && !allergen && (
+                          <span className="text-[10px] font-bold bg-[var(--alert-red)] text-white px-2 py-0.5 rounded">BUY</span>
+                        )}
+                      </div>
                     </div>
                     {ing.alternative && (
                       <div className="mt-2 flex items-start text-xs">
@@ -615,7 +668,7 @@ const RecipesScreen: React.FC = () => {
               <Heart size={20} className={savedNames.has(viewRecipe.name.toLowerCase().trim()) ? 'fill-[var(--alert-red)]' : ''} />
             </button>
             <button onClick={handleCooked} disabled={markingCooked} className="flex-1 discovery-btn-primary py-3.5 text-lg disabled:opacity-60">
-              {markingCooked ? 'Logging…' : '👨‍🍳 I cooked this'}
+              {markingCooked ? 'Logging…' : 'I cooked this'}
             </button>
           </div>
         </div>

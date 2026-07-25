@@ -187,26 +187,72 @@ const PantryScreen: React.FC<PantryScreenProps> = ({ onNavigateToRecipes }) => {
           </div>
         ))}
 
-        {filteredItems.length === 0 && (
-          <div className="text-center text-[var(--ink-muted)] py-8">
-            No items found matching "{searchQuery}"
+        {/* Empty pantry state — no baskets, no manual additions, no active search */}
+        {items.length === 0 && !searchQuery && (
+          <div className="discovery-card text-center py-8">
+            <div className="mx-auto w-12 h-12 rounded-full bg-[var(--bg)] flex items-center justify-center mb-3">
+              <Plus size={22} className="text-[var(--ink-muted)]" />
+            </div>
+            <p className="font-bold text-[var(--ink)]">Your pantry is empty</p>
+            <p className="text-xs text-[var(--ink-muted)] mt-1 px-6">Add what's in your kitchen below and we'll categorise it for you.</p>
           </div>
         )}
 
-        {/* Add Item Button */}
-        <div className="pt-4">
-          <button 
+        {/* Empty-search state — user filtered and nothing matched */}
+        {items.length > 0 && filteredItems.length === 0 && searchQuery && (
+          <div className="text-center text-[var(--ink-muted)] py-8">
+            No items match "{searchQuery}"
+          </div>
+        )}
+
+        {/* Inline Quick Add — always available so users don't have to hunt for the modal.
+            Categorises live as you type. */}
+        <div className="discovery-card space-y-3">
+          <div className="flex items-center">
+            <Plus size={18} className="text-[var(--navy)] mr-2" />
+            <p className="font-bold text-[var(--ink)] text-sm">Quick add</p>
+          </div>
+          <form onSubmit={handleManualAdd} className="flex gap-2">
+            <input
+              type="text"
+              value={manualInput}
+              onChange={(e) => setManualInput(e.target.value)}
+              placeholder="e.g. Chicken breast, oats, apples"
+              className="flex-1 bg-[var(--bg)] border border-[var(--line)] rounded-lg px-3 py-2 text-sm outline-none focus:border-[var(--teal)]"
+              autoCapitalize="none"
+              autoCorrect="off"
+            />
+            <button
+              type="submit"
+              disabled={adding || !manualInput.trim()}
+              className="bg-[var(--navy)] text-white px-4 py-2 rounded-lg font-bold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+            >
+              {adding ? 'Adding...' : 'Add'}
+            </button>
+          </form>
+          {previewCategory && manualInput.trim() && (
+            <div className="flex items-center text-[11px] text-[var(--ink-muted)]">
+              <Tag size={11} className="mr-1 text-[var(--teal)]" />
+              Will be categorised as
+              <span className="font-bold text-[var(--navy)] ml-1">{previewCategory}</span>
+            </div>
+          )}
+        </div>
+
+        {/* More options (scan, sync, additional context) */}
+        <div className="pt-2">
+          <button
             onClick={() => setShowAddMenu(true)}
-            className="w-full border-2 border-dashed border-[var(--navy)] text-[var(--navy)] font-bold py-4 rounded-xl flex items-center justify-center bg-white hover:bg-[var(--navy-tint)] transition-colors"
+            className="w-full border-2 border-dashed border-[var(--line)] text-[var(--ink-muted)] font-bold py-3 rounded-xl flex items-center justify-center bg-white hover:bg-[var(--bg)] transition-colors text-sm"
           >
-            <Plus size={20} className="mr-2" /> Add item
+            More ways to add
           </button>
         </div>
       </div>
 
       {/* Add Item Bottom Sheet Modal */}
       {showAddMenu && (
-        <div className="absolute inset-0 z-50 flex items-end bg-[var(--navy-deep)] bg-opacity-60 backdrop-blur-sm">
+        <div className="absolute inset-0 z-[60] flex items-end bg-[var(--navy-deep)] bg-opacity-60 backdrop-blur-sm">
           <div className="bg-white w-full rounded-t-3xl p-6 shadow-2xl animate-slide-up">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-[var(--navy)]">Add to Pantry</h2>

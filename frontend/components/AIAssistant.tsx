@@ -92,6 +92,19 @@ const RecipeChatCard: React.FC<{
       </button>
     </div>
     <div className="p-3">
+      {/* ALLERGEN WARNING — the most important thing to say */}
+      {recipe.allergen_warnings && recipe.allergen_warnings.length > 0 && (
+        <div className="bg-[#FFE9E4] border-2 border-[var(--alert-red)] rounded-lg p-2 mb-2 flex items-start">
+          <AlertCircle size={14} className="text-[var(--alert-red)] mr-1.5 mt-0.5 flex-shrink-0" />
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold text-[var(--alert-red)] uppercase tracking-wider">Allergy warning</p>
+            <p className="text-[11px] text-[var(--ink)] mt-0.5">
+              Contains <span className="font-bold text-[var(--alert-red)]">{recipe.allergen_warnings.join(', ')}</span>
+            </p>
+          </div>
+        </div>
+      )}
+
       <h4 className="font-bold text-[var(--ink)] text-sm leading-tight">{recipe.name}</h4>
 
       <div className="flex items-center flex-wrap gap-2 mt-2 text-[10px] text-[var(--ink-muted)]">
