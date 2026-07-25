@@ -6,6 +6,10 @@ node_modules/
 dist/
 **/dist/
 
+# runtime data (per-VM, don't commit)
+backend/data/
+data/
+
 # secrets / local env
 .env
 .env.local

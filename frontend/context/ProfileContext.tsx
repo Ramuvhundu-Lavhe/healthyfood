@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { Profile } from '../types';
 import { getProfile } from '../api';
+import { useAuth } from './AuthContext';
 
 interface ToastMessage {
   id: number;
@@ -11,7 +12,8 @@ interface ProfileContextType {
   profile: Profile | null;
   updateProfile: (updated: Profile) => void;
   addToast: (message: string) => void;
-  
+  refreshProfile: () => Promise<void>;
+
   // AI Assistant State
   isAIOpen: boolean;
   aiInitialMessage: string;
@@ -22,20 +24,27 @@ interface ProfileContextType {
 const ProfileContext = createContext<ProfileContextType | undefined>(undefined);
 
 export const ProfileProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const { user } = useAuth();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  
+
   // AI State
   const [isAIOpen, setIsAIOpen] = useState(false);
   const [aiInitialMessage, setAiInitialMessage] = useState('');
 
-  useEffect(() => {
-    const initProfile = async () => {
-      const data = await getProfile('CUST-001');
+  const refreshProfile = async () => {
+    if (!user?.customer_id) return;
+    try {
+      const data = await getProfile(user.customer_id);
       setProfile(data);
-    };
-    initProfile();
-  }, []);
+    } catch (e) {
+      console.warn('refreshProfile failed', e);
+    }
+  };
+
+  useEffect(() => {
+    refreshProfile();
+  }, [user?.customer_id]);
 
   const updateProfile = (updated: Profile) => {
     setProfile(updated);
@@ -60,7 +69,7 @@ export const ProfileProvider: React.FC<{ children: ReactNode }> = ({ children })
   };
 
   return (
-    <ProfileContext.Provider value={{ profile, updateProfile, addToast, isAIOpen, aiInitialMessage, openAI, closeAI }}>
+    <ProfileContext.Provider value={{ profile, updateProfile, addToast, refreshProfile, isAIOpen, aiInitialMessage, openAI, closeAI }}>
       {children}
       {/* Toast Container */}
       <div className="absolute bottom-24 left-0 right-0 z-[100] flex flex-col items-center pointer-events-none space-y-2 px-4">

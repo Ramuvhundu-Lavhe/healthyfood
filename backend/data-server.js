@@ -24,6 +24,7 @@ import xlsx from 'xlsx';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { GoogleGenAI } from '@google/genai';
+import { db } from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -146,7 +147,9 @@ function loadExcel() {
     for (const cid of Object.keys(DB.customers)) {
       const c = DB.customers[cid];
       c.baskets = Object.values(c.baskets).sort((a, b) => a.date - b.date);
-      DB.prefs[cid] = defaultPrefs();
+      // Only seed defaults if the persistent DB has no prefs yet for this customer.
+      if (!db.getPrefs(cid)) db.setPrefs(cid, defaultPrefs());
+      DB.prefs[cid] = defaultPrefs(); // in-memory mirror for legacy readers
     }
     DB.loaded = true;
     console.log(`[data-api] Loaded ${Object.keys(DB.customers).length} customers from ${path.basename(TX_FILE)}`);
@@ -196,6 +199,7 @@ function seedDemoFallback() {
     ],
   };
   DB.prefs[cid] = defaultPrefs();
+  if (!db.getPrefs(cid)) db.setPrefs(cid, defaultPrefs());
   DB.loaded = true;
 }
 function demoBasket(id, daysAgo, items) {
@@ -239,7 +243,7 @@ function computeProfile(cid) {
   const weeks = Math.max(1, c.baskets.length);
   const avg_weekly_spend = Math.round(totalSpend / weeks);
 
-  const prefsSet = DB.prefs[cid] || defaultPrefs();
+  const prefsSet = db.getPrefs(cid) || DB.prefs[cid] || defaultPrefs();
   const completeness = 50
     + (prefsSet.allergies.length ? 10 : 0)
     + (prefsSet.diet !== 'none' ? 15 : 0)
@@ -307,8 +311,23 @@ function computePantry(cid) {
       });
     }
   }
+  // Merge in user-added pantry items (from the persistent store)
+  const added = db.getPantryAdditions(cid);
+  for (const a of added) {
+    if (seen.has(a.name)) continue;
+    seen.set(a.name, {
+      name: a.name,
+      category: a.category || 'Added manually',
+      is_healthy: HEALTHY_CATEGORIES.has(a.category || ''),
+      is_healthyfood: HEALTHY_CATEGORIES.has(a.category || ''),
+      days_until_expiry: a.days_until_expiry ?? 14,
+      photo: photoFor(a.name),
+      allergen_conflict: false,
+      diet_conflict: false,
+    });
+  }
   // apply allergy / diet flags
-  const prefs = DB.prefs[cid] || defaultPrefs();
+  const prefs = db.getPrefs(cid) || DB.prefs[cid] || defaultPrefs();
   const items = [...seen.values()].map(i => applyConflicts(i, prefs));
   // sort: expiring first, then healthy
   items.sort((a, b) => a.days_until_expiry - b.days_until_expiry);
@@ -443,14 +462,56 @@ async function callGemini(promptText) {
   return JSON.parse(text.replace(/```json|```/g, '').trim());
 }
 
+// Classifies a raw pantry-item name into one of the HEALTHY_CATEGORIES
+// (or 'Unhealthy foods'). Falls back to a keyword rule if Gemini is unavailable.
+async function categorizePantryItem(name) {
+  const CATEGORIES = [
+    'Fruit and vegetables',
+    'Animal protein',
+    'Dairy',
+    'Whole grains and high-fibre starchy foods',
+    'Legumes',
+    'Oils, nuts and seeds',
+    'Unhealthy foods',
+  ];
+  // Rule-based first (fast + deterministic for well-known items)
+  const n = name.toLowerCase();
+  if (/chocolate|sweet|candy|chips|crisp|soda|cola|fizzy|ice cream|cookie|biscuit|rusks?|cake|pastry/.test(n)) return 'Unhealthy foods';
+  if (/onion|garlic|tomato|spinach|carrot|pepper|fruit|vegetable|salad|lettuce|cucumber|potato|apple|banana|orange|grape|berry|mango|avocado|leek|celery|broccoli|cauliflower|kale|beet/.test(n)) return 'Fruit and vegetables';
+  if (/chicken|beef|fish|tuna|sardine|mince|steak|egg|ostrich|pork|lamb|mackerel|hake|snoek|prawn|pilchard/.test(n)) return 'Animal protein';
+  if (/yogurt|yoghurt|milk|cheese|cream|amasi|maas/.test(n)) return 'Dairy';
+  if (/samp|maize|couscous|rice|noodle|pasta|bulgar|buckwheat|oats|bread|quinoa|barley/.test(n)) return 'Whole grains and high-fibre starchy foods';
+  if (/bean|lentil|chickpea|split pea/.test(n)) return 'Legumes';
+  if (/oil|nut|seed|olive|almond|cashew|pecan|peanut/.test(n)) return 'Oils, nuts and seeds';
+  // Fall back to Gemini if enabled
+  if (!genAI) return 'Fruit and vegetables';
+  try {
+    const out = await callGemini(`Classify this pantry item into exactly ONE of these South African HealthyFood categories: ${CATEGORIES.join(' | ')}. Item: "${name}". Return strict JSON: {"category": "..."}. No preamble.`);
+    const cat = out?.category;
+    return CATEGORIES.includes(cat) ? cat : 'Fruit and vegetables';
+  } catch (_) {
+    return 'Fruit and vegetables';
+  }
+}
+
 async function generateRecipes(cid, query = {}) {
   const pantry = computePantry(cid).items;
-  const prefs = DB.prefs[cid] || defaultPrefs();
-  const safePantry = pantry.filter(i => !i.allergen_conflict).map(i => i.name);
-  const expiring = pantry.filter(i => i.days_until_expiry <= 3).map(i => i.name);
+  const prefs = db.getPrefs(cid) || DB.prefs[cid] || defaultPrefs();
+  const safePantry = pantry.filter(i => !i.allergen_conflict && !i.diet_conflict).map(i => i.name);
+  const expiring = pantry.filter(i => i.days_until_expiry <= 3 && !i.allergen_conflict).map(i => i.name);
+
+  // Learning signal: recent cooks + explicit reviews
+  const cooked = db.getCooked(cid).slice(0, 8).map(c => c.recipe_name);
+  const liked = db.getLikedRecipes(cid);
+  const disliked = db.getDislikedRecipes(cid);
 
   const userQuery = query.search || query.q || query.prompt || '';
   const searchPrompt = userQuery ? `User custom craving/search request: "${userQuery}". Build recipes specifically matching this request while strictly utilizing the user's pantry items below.` : '';
+
+  const historyBlock = (cooked.length || liked.length || disliked.length) ? `
+Recent cooking history — recipes user has actually cooked (suggest similar styles): ${cooked.join(', ') || 'none'}
+Liked recipes (lean into these flavours/techniques): ${liked.join(', ') || 'none'}
+Disliked recipes (AVOID recipes similar to these): ${disliked.join(', ') || 'none'}` : '';
 
   const prompt = `You are the Discovery HealthyFood AI Agent & Recipe Search Assistant for South Africa.
 CRITICAL: You MUST construct recipes using the user's EXACT pantry inventory below:
@@ -458,53 +519,82 @@ User Pantry Items: ${safePantry.join(', ')}
 Expiring Soon (MUST prioritize using these): ${expiring.join(', ') || 'none'}
 Household size: ${prefs.household_size}
 Diet preference: ${prefs.diet}
-Allergies to avoid completely: ${prefs.allergies.join(', ') || 'none'}
+Allergies to avoid completely (HARD RULE — never include or suggest these or foods that contain them): ${prefs.allergies.join(', ') || 'none'}
 Context: event=${query.event || 'none'}, goal=${query.goal || 'general'}, power=${query.power || 'on'}.
+${historyBlock}
 ${searchPrompt}
 
 Rule: Ingredients MUST specify exact items from the user's pantry (e.g. "${safePantry[0] || 'Fresh Vegetables'}", "${safePantry[1] || 'Sardines'}"). Do NOT use generic names like "Protein" or "Grains".
 Return strict JSON format:
-{ 
-  "recipes": [ 
-    { 
-      "name": "Recipe Title", 
-      "photo": "", 
-      "prep_time_category": "15 Min Quick Meals", 
-      "cook_time_minutes": 15, 
-      "cooking_method": "⚡ Quick", 
-      "diet_tags": ["pescatarian", "halal"], 
-      "all_in_pantry": true, 
-      "missing_items": [], 
-      "ingredients": [{"name": "${safePantry[0] || 'Fresh Vegetables'}", "amount": "1 cup", "alternative": "Tinned Veg"}], 
-      "health_benefit": "High in nutrients for heart health.", 
-      "allergy_safe": true, 
-      "uses_expiring": true, 
-      "servings": ${prefs.household_size}, 
-      "calories": 420, 
-      "budget_savings_rand": 45, 
-      "steps": ["Step 1", "Step 2"] 
-    } 
-  ] 
+{
+  "recipes": [
+    {
+      "name": "Recipe Title",
+      "photo": "",
+      "prep_time_category": "15 Min Quick Meals",
+      "cook_time_minutes": 15,
+      "cooking_method": "⚡ Quick",
+      "diet_tags": ["pescatarian", "halal"],
+      "all_in_pantry": true,
+      "missing_items": [],
+      "ingredients": [{"name": "${safePantry[0] || 'Fresh Vegetables'}", "amount": "1 cup", "alternative": "Tinned Veg"}],
+      "health_benefit": "High in nutrients for heart health.",
+      "allergy_safe": true,
+      "uses_expiring": true,
+      "servings": ${prefs.household_size},
+      "calories": 420,
+      "budget_savings_rand": 45,
+      "steps": ["Step 1", "Step 2"]
+    }
+  ]
 }
 Generate 3 personalized recipes. Only pantry ingredients (plus 1-2 common staples in missing_items if necessary). No preamble.`;
 
   const out = await callGemini(prompt);
+  const dislikedLower = new Set(disliked.map(d => d.toLowerCase()));
   const recipes = (out.recipes || []).map(r => ({
     ...r,
     photo: photoForRecipe(r.name, r.ingredients),
   })).filter(r => {
+    // Hard allergen re-check on the AI output
     const text = JSON.stringify(r).toLowerCase();
-    return !prefs.allergies.some(a => text.includes(a.toLowerCase()));
+    if (prefs.allergies.some(a => a && text.includes(a.toLowerCase()))) return false;
+    // Exclude anything that matches a previously disliked recipe by name
+    if (dislikedLower.has(String(r.name).toLowerCase())) return false;
+    return true;
   });
   if (!recipes.length) throw new Error('no safe recipes generated');
   return { recipes };
 }
 
-// ───────────────────────── Auth (simple) ─────────────────────────
-const USERS = {}; // username -> { hash, customer_id }
+// ───────────────────────── Auth (persistent) ─────────────────────────
 function seedDemoUser() {
-  USERS['aisha'] = { hash: bcrypt.hashSync('demo123', 8), customer_id: 'CUST-001' };
+  // Only seed if not already in the persistent store
+  if (!db.userExists('aisha')) {
+    db.createUser('aisha', { hash: bcrypt.hashSync('demo123', 8), customer_id: 'CUST-001', name: 'Aisha' });
+  }
 }
+
+// Attaches req.user if a valid Bearer token is present. Never blocks.
+function authOptional(req, res, next) {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.replace(/^Bearer\s+/i, '');
+  if (token) {
+    try { req.user = jwt.verify(token, JWT_SECRET); } catch (_) { /* ignore */ }
+  }
+  next();
+}
+
+// Requires a valid Bearer token; 401 otherwise.
+function authRequired(req, res, next) {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.replace(/^Bearer\s+/i, '');
+  if (!token) return res.status(401).json({ error: 'Missing token' });
+  try { req.user = jwt.verify(token, JWT_SECRET); next(); }
+  catch (e) { return res.status(401).json({ error: 'Invalid or expired token' }); }
+}
+
+app.use(authOptional);
 
 // ───────────────────────── Routes ─────────────────────────
 app.get('/health', (req, res) => res.json({
@@ -513,22 +603,65 @@ app.get('/health', (req, res) => res.json({
 }));
 
 app.post('/auth/register', (req, res) => {
-  const { username, password, customer_id } = req.body || {};
+  const { username, password, name, preferences } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'username and password required' });
-  USERS[username] = { hash: bcrypt.hashSync(password, 8), customer_id: customer_id || 'CUST-001' };
-  res.json({ ok: true });
+  if (password.length < 6) return res.status(400).json({ error: 'password must be at least 6 characters' });
+  if (db.userExists(username)) return res.status(409).json({ error: 'username already taken' });
+
+  const customer_id = db.allocateCustomerId();
+  db.createUser(username, {
+    hash: bcrypt.hashSync(password, 8),
+    customer_id,
+    name: name || username,
+  });
+
+  // Seed prefs (or defaults) — this is where signup collects allergies/diet
+  const seededPrefs = { ...defaultPrefs(), ...(preferences || {}) };
+  db.setPrefs(customer_id, seededPrefs);
+
+  // Create an empty customer stub so all downstream computations work
+  if (!DB.customers[customer_id]) {
+    DB.customers[customer_id] = { customer_id, name: name || username, retailer: 'Checkers', baskets: [] };
+  }
+
+  const token = jwt.sign({ username: username.toLowerCase(), customer_id }, JWT_SECRET, { expiresIn: '24h' });
+  res.json({ token, customer_id, name: name || username, preferences: seededPrefs });
 });
 
 app.post('/auth/login', (req, res) => {
   const { username, password } = req.body || {};
-  const u = USERS[username];
-  if (!u || !bcrypt.compareSync(password || '', u.hash)) return res.status(401).json({ error: 'invalid credentials' });
-  const token = jwt.sign({ username, customer_id: u.customer_id }, JWT_SECRET, { expiresIn: '24h' });
-  const name = DB.customers[u.customer_id]?.name || username;
-  res.json({ token, customer_id: u.customer_id, name });
+  if (!username || !password) return res.status(400).json({ error: 'username and password required' });
+  const u = db.getUser(username);
+  if (!u || !bcrypt.compareSync(password, u.hash)) {
+    return res.status(401).json({ error: 'invalid username or password' });
+  }
+  const token = jwt.sign({ username: u.username, customer_id: u.customer_id }, JWT_SECRET, { expiresIn: '24h' });
+  const name = DB.customers[u.customer_id]?.name || u.name || u.username;
+  res.json({ token, customer_id: u.customer_id, name, preferences: db.getPrefs(u.customer_id) || defaultPrefs() });
+});
+
+app.get('/auth/me', authRequired, (req, res) => {
+  const cid = req.user.customer_id;
+  const u = db.getUser(req.user.username);
+  if (!u) return res.status(404).json({ error: 'user not found' });
+  res.json({
+    username: u.username,
+    customer_id: cid,
+    name: DB.customers[cid]?.name || u.name || u.username,
+    preferences: db.getPrefs(cid) || defaultPrefs(),
+  });
 });
 
 function resolveCid(req) {
+  // Prefer authenticated user's customer_id when present
+  if (req.user?.customer_id) {
+    const c = req.user.customer_id;
+    // Ensure a customer stub exists for new users who haven't loaded transaction data
+    if (!DB.customers[c]) {
+      DB.customers[c] = { customer_id: c, name: req.user.username, retailer: 'Checkers', baskets: [] };
+    }
+    return c;
+  }
   const cid = req.params.customerId;
   if (DB.customers[cid]) return cid;
   const keys = Object.keys(DB.customers);
@@ -542,8 +675,9 @@ app.get('/profile/:customerId', (req, res) => {
 
 app.put('/profile/:customerId/preferences', (req, res) => {
   const cid = resolveCid(req);
-  DB.prefs[cid] = { ...(DB.prefs[cid] || defaultPrefs()), ...(req.body || {}) };
-  res.json(DB.prefs[cid]);
+  const updated = db.setPrefs(cid, req.body || {});
+  DB.prefs[cid] = updated; // keep legacy mirror in sync
+  res.json(updated);
 });
 
 app.get('/pantry/:customerId', (req, res) => {
@@ -551,15 +685,70 @@ app.get('/pantry/:customerId', (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/pantry/:customerId/add', (req, res) => {
+app.post('/pantry/:customerId/add', async (req, res) => {
   const cid = resolveCid(req);
-  const pantry = computePantry(cid);
-  const name = (req.body?.name || 'New item').trim();
-  pantry.items.unshift({
-    name, category: 'Added manually', is_healthy: true, is_healthyfood: false,
-    days_until_expiry: 14, photo: photoFor(name), allergen_conflict: false, diet_conflict: false,
+  const name = String(req.body?.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'name required' });
+
+  // Auto-categorize if not provided
+  let category = req.body?.category;
+  if (!category) {
+    try { category = await categorizePantryItem(name); }
+    catch (_) { category = 'Fruit and vegetables'; }
+  }
+
+  db.addPantryItem(cid, {
+    name,
+    category,
+    days_until_expiry: req.body?.days_until_expiry ?? 14,
   });
-  res.json(pantry);
+  res.json(computePantry(cid));
+});
+
+app.delete('/pantry/:customerId/item/:name', (req, res) => {
+  const cid = resolveCid(req);
+  const removed = db.removePantryItem(cid, req.params.name);
+  res.json({ ok: true, removed, pantry: computePantry(cid) });
+});
+
+// Standalone category classifier — frontend can preview before adding
+app.post('/pantry/categorize', async (req, res) => {
+  const name = String(req.body?.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'name required' });
+  try {
+    const category = await categorizePantryItem(name);
+    res.json({ name, category });
+  } catch (e) {
+    res.json({ name, category: 'Fruit and vegetables', note: 'fallback' });
+  }
+});
+
+// ── Cooked tracking ──
+app.post('/cooked/:customerId', (req, res) => {
+  const cid = resolveCid(req);
+  const { recipe_name, ingredients, tags } = req.body || {};
+  if (!recipe_name) return res.status(400).json({ error: 'recipe_name required' });
+  db.addCooked(cid, { recipe_name, ingredients: ingredients || [], tags: tags || [] });
+  res.json({ ok: true, cooked: db.getCooked(cid).slice(0, 10) });
+});
+app.get('/cooked/:customerId', (req, res) => {
+  const cid = resolveCid(req);
+  res.json({ items: db.getCooked(cid) });
+});
+
+// ── Reviews (like/dislike) ──
+app.post('/reviews/:customerId', (req, res) => {
+  const cid = resolveCid(req);
+  const { recipe_name, rating, tags } = req.body || {};
+  if (!recipe_name || (rating !== 1 && rating !== -1)) {
+    return res.status(400).json({ error: 'recipe_name and rating (1 or -1) required' });
+  }
+  db.setReview(cid, recipe_name, { rating, tags: tags || [] });
+  res.json({ ok: true, reviews: db.getReviews(cid) });
+});
+app.get('/reviews/:customerId', (req, res) => {
+  const cid = resolveCid(req);
+  res.json({ reviews: db.getReviews(cid) });
 });
 
 app.get('/recipes/:customerId', async (req, res) => {

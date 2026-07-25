@@ -1,7 +1,19 @@
 import axios from 'axios';
-import { Profile, PantryResponse, RecipeResponse, ProgressResponse, HeritageResponse, CommunityResponse, ShoppingListResponse } from './types';
+import { Profile, PantryResponse, RecipeResponse, ProgressResponse, HeritageResponse, CommunityResponse, ShoppingListResponse, Preferences } from './types';
 
 const API_URL = (import.meta as any).env?.VITE_API_URL || 'https://api.example.com';
+
+// Attach auth token from localStorage to every request
+axios.interceptors.request.use((config) => {
+  try {
+    const token = localStorage.getItem('hf_token');
+    if (token) {
+      config.headers = config.headers || {};
+      (config.headers as any).Authorization = `Bearer ${token}`;
+    }
+  } catch (_) { /* ignore */ }
+  return config;
+});
 
 // --- MOCK DATA ---
 const mockProfile: Profile = {
@@ -330,6 +342,65 @@ export const getCommunity = async (customerId: string): Promise<CommunityRespons
     console.warn('Failed to fetch community, using mock data');
     return mockCommunity;
   }
+};
+
+// ─────────────── Auth ───────────────
+export interface AuthResponse {
+  token: string;
+  customer_id: string;
+  name: string;
+  preferences: Preferences;
+}
+
+export const register = async (input: {
+  username: string;
+  password: string;
+  name?: string;
+  preferences?: Partial<Preferences>;
+}): Promise<AuthResponse> => {
+  const response = await axios.post(`${API_URL}/auth/register`, input);
+  return response.data;
+};
+
+export const login = async (input: { username: string; password: string }): Promise<AuthResponse> => {
+  const response = await axios.post(`${API_URL}/auth/login`, input);
+  return response.data;
+};
+
+export const getMe = async (): Promise<{ username: string; customer_id: string; name: string; preferences: Preferences }> => {
+  const response = await axios.get(`${API_URL}/auth/me`);
+  return response.data;
+};
+
+// ─────────────── Cooked + Reviews ───────────────
+export const recordCooked = async (customerId: string, recipe_name: string, ingredients?: string[]): Promise<void> => {
+  try { await axios.post(`${API_URL}/cooked/${customerId}`, { recipe_name, ingredients }); }
+  catch (e) { console.warn('recordCooked failed:', (e as Error).message); }
+};
+
+export const recordReview = async (customerId: string, recipe_name: string, rating: 1 | -1): Promise<void> => {
+  try { await axios.post(`${API_URL}/reviews/${customerId}`, { recipe_name, rating }); }
+  catch (e) { console.warn('recordReview failed:', (e as Error).message); }
+};
+
+// ─────────────── Pantry additions ───────────────
+export const addPantryItem = async (customerId: string, name: string, category?: string): Promise<PantryResponse> => {
+  const response = await axios.post(`${API_URL}/pantry/${customerId}/add`, { name, category });
+  return response.data;
+};
+
+export const categorizePantryItem = async (name: string): Promise<{ name: string; category: string }> => {
+  try {
+    const response = await axios.post(`${API_URL}/pantry/categorize`, { name });
+    return response.data;
+  } catch {
+    return { name, category: 'Fruit and vegetables' };
+  }
+};
+
+export const removePantryItem = async (customerId: string, name: string): Promise<PantryResponse> => {
+  const response = await axios.delete(`${API_URL}/pantry/${customerId}/item/${encodeURIComponent(name)}`);
+  return response.data.pantry;
 };
 
 export const getShoppingList = async (customerId: string): Promise<ShoppingListResponse> => {
