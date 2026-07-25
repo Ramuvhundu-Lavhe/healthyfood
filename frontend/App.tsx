@@ -3,6 +3,7 @@ import BottomNav from './components/BottomNav';
 import HomeScreen from './screens/HomeScreen';
 import PantryScreen from './screens/PantryScreen';
 import RecipesScreen from './screens/RecipesScreen';
+import ShoppingListScreen from './screens/ShoppingListScreen';
 import TogetherScreen from './screens/TogetherScreen';
 import ProgressScreen from './screens/ProgressScreen';
 import ProfileScreen from './screens/ProfileScreen';
@@ -20,6 +21,8 @@ const AppContent: React.FC = () => {
         return <PantryScreen onNavigateToRecipes={() => setActiveTab('recipes')} />;
       case 'recipes':
         return <RecipesScreen />;
+      case 'shopping':
+        return <ShoppingListScreen />;
       case 'together':
         return <TogetherScreen />;
       case 'progress':

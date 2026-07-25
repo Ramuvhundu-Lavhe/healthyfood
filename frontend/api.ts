@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Profile, PantryResponse, RecipeResponse, ProgressResponse, HeritageResponse, CommunityResponse } from './types';
+import { Profile, PantryResponse, RecipeResponse, ProgressResponse, HeritageResponse, CommunityResponse, ShoppingListResponse } from './types';
 
 const API_URL = (import.meta as any).env?.VITE_API_URL || 'https://api.example.com';
 
@@ -329,5 +329,26 @@ export const getCommunity = async (customerId: string): Promise<CommunityRespons
   } catch (error) {
     console.warn('Failed to fetch community, using mock data');
     return mockCommunity;
+  }
+};
+
+export const getShoppingList = async (customerId: string): Promise<ShoppingListResponse> => {
+  try {
+    const response = await axios.get(`${API_URL}/shopping-list/${customerId}`);
+    return response.data;
+  } catch (error) {
+    console.warn('Failed to fetch shopping list, using empty fallback');
+    return {
+      items: [
+        { name: 'Onions', category: 'Fruit and vegetables', priority: 'high', reason: 'Kitchen staple, works with everything you have', estimated_cost: 15, is_healthyfood: false },
+        { name: 'Fresh Vegetables', category: 'Fruit and vegetables', priority: 'high', reason: 'Your veggies expire in 2 days — replace on next shop', estimated_cost: 40, is_healthyfood: true },
+        { name: 'Plain Yoghurt', category: 'Dairy', priority: 'medium', reason: 'No dairy in your pantry — calcium + probiotics', estimated_cost: 30, is_healthyfood: true },
+        { name: 'Lentils', category: 'Legumes', priority: 'low', reason: 'Cheap plant protein, pairs with your grains', estimated_cost: 25, is_healthyfood: true },
+      ],
+      total_cost: 110,
+      budget_target: 300,
+      budget_status: 'under',
+      priority_note: '2 items in your pantry expire this week — buy fresh replacements first.',
+    };
   }
 };

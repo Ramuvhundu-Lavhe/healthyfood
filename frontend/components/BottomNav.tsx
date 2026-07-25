@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, ShoppingBasket, ChefHat, Users, TrendingUp, User } from 'lucide-react';
+import { Home, ShoppingBasket, ChefHat, ShoppingCart, Users, TrendingUp, User } from 'lucide-react';
 
 interface BottomNavProps {
   activeTab: string;
@@ -11,9 +11,10 @@ const BottomNav: React.FC<BottomNavProps> = ({ activeTab, onChangeTab }) => {
     { id: 'home', label: 'Home', icon: Home },
     { id: 'pantry', label: 'Pantry', icon: ShoppingBasket },
     { id: 'recipes', label: 'Recipes', icon: ChefHat },
-    { id: 'together', label: 'Together', icon: Users },
+    { id: 'shopping', label: 'Shop', icon: ShoppingCart },
+    { id: 'together', label: 'Group', icon: Users },
     { id: 'progress', label: 'Progress', icon: TrendingUp },
-    { id: 'profile', label: 'Profile', icon: User },
+    { id: 'profile', label: 'Me', icon: User },
   ];
 
   return (

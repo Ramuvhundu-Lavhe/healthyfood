@@ -156,3 +156,20 @@ export interface CommunityResponse {
   active_challenge: CommunityChallenge;
   upcoming: UpcomingChallenge[];
 }
+
+export interface ShoppingListItem {
+  name: string;
+  category: string;
+  priority: 'high' | 'medium' | 'low';
+  reason: string;
+  estimated_cost: number;
+  is_healthyfood: boolean;
+}
+
+export interface ShoppingListResponse {
+  items: ShoppingListItem[];
+  total_cost: number;
+  budget_target: number;
+  budget_status: 'under' | 'at' | 'over';
+  priority_note: string;
+}

@@ -644,6 +644,146 @@ app.get('/progress/:customerId', (req, res) => {
 app.get('/heritage/today', (req, res) => res.json(computeHeritage()));
 app.get('/community/:customerId', (req, res) => res.json(computeCommunity()));
 
+// ───────────────────────── Smart Shopping List ─────────────────────────
+// Rough ZAR retail estimates by category — good enough for a total.
+const COST_BY_CATEGORY = {
+  'Fruit and vegetables': 25,
+  'Animal protein': 70,
+  'Dairy': 30,
+  'Whole grains and high-fibre starchy foods': 40,
+  'Legumes': 25,
+  'Oils, nuts and seeds': 55,
+  'Unhealthy foods': 30,
+};
+const DEFAULT_COST = 30;
+
+const BUDGET_TARGET_BY_TIER = { low: 150, medium: 300, high: 500 };
+
+// HealthyFood staples that are broadly useful when a pantry gap exists.
+const STAPLE_SUGGESTIONS = [
+  { name: 'Onions', category: 'Fruit and vegetables', is_healthyfood: false },
+  { name: 'Garlic', category: 'Fruit and vegetables', is_healthyfood: false },
+  { name: 'Plain Yoghurt', category: 'Dairy', is_healthyfood: true },
+  { name: 'Lentils', category: 'Legumes', is_healthyfood: true },
+];
+
+function categoryFor(name = '') {
+  const n = name.toLowerCase();
+  if (/onion|garlic|tomato|spinach|carrot|pepper|fruit|veg|salad|lettuce|cucumber|potato/.test(n)) return 'Fruit and vegetables';
+  if (/chicken|beef|fish|tuna|sardine|mince|steak|egg|ostrich|pork|lamb/.test(n)) return 'Animal protein';
+  if (/yogurt|yoghurt|milk|cheese|cream/.test(n)) return 'Dairy';
+  if (/samp|maize|couscous|rice|noodle|pasta|bulgar|buckwheat|oats|bread/.test(n)) return 'Whole grains and high-fibre starchy foods';
+  if (/bean|lentil|chickpea|pea/.test(n)) return 'Legumes';
+  if (/oil|nut|seed|olive|avocado/.test(n)) return 'Oils, nuts and seeds';
+  return 'Fruit and vegetables';
+}
+
+function estimateCost(name, category) {
+  return COST_BY_CATEGORY[category] || DEFAULT_COST;
+}
+
+function computeShoppingList(cid) {
+  const prefs = DB.prefs[cid] || defaultPrefs();
+  const pantry = computePantry(cid).items;
+  const items = [];
+  const seen = new Set();
+
+  const push = (item) => {
+    const key = item.name.toLowerCase().trim();
+    if (seen.has(key)) return;
+    seen.add(key);
+    items.push(item);
+  };
+
+  // Priority 1 — expiring perishables: suggest fresh replacements
+  const expiring = pantry.filter(i => i.days_until_expiry <= 3 && i.is_healthy);
+  for (const ex of expiring) {
+    push({
+      name: `Fresh ${ex.name}`,
+      category: ex.category,
+      priority: 'high',
+      reason: `Your ${ex.name} expires in ${ex.days_until_expiry} day${ex.days_until_expiry === 1 ? '' : 's'} — replace on your next shop`,
+      estimated_cost: estimateCost(ex.name, ex.category),
+      is_healthyfood: ex.is_healthyfood,
+    });
+  }
+
+  // Priority 2 — missing items across a set of pantry recipes
+  const suggested = fallbackRecipes(cid, {}).recipes;
+  for (const r of suggested) {
+    for (const m of (r.missing_items || [])) {
+      const cat = categoryFor(m.name);
+      push({
+        name: m.name,
+        category: cat,
+        priority: 'medium',
+        reason: `Needed for "${r.name}"`,
+        estimated_cost: estimateCost(m.name, cat),
+        is_healthyfood: !!m.is_healthyfood,
+      });
+    }
+  }
+
+  // Priority 3 — category gaps based on diet
+  const pantryCats = new Set(pantry.map(i => i.category));
+  if (!pantryCats.has('Legumes') && prefs.diet !== 'banting') {
+    push({
+      name: 'Lentils',
+      category: 'Legumes',
+      priority: 'low',
+      reason: 'No legumes in your pantry — great cheap plant protein',
+      estimated_cost: estimateCost('Lentils', 'Legumes'),
+      is_healthyfood: true,
+    });
+  }
+  if (!pantryCats.has('Dairy') && !prefs.allergies?.includes('dairy')) {
+    push({
+      name: 'Plain Yoghurt',
+      category: 'Dairy',
+      priority: 'low',
+      reason: 'No dairy in your pantry — good source of calcium and probiotics',
+      estimated_cost: estimateCost('Plain Yoghurt', 'Dairy'),
+      is_healthyfood: true,
+    });
+  }
+  if (!pantry.some(i => /onion|garlic/i.test(i.name))) {
+    push({
+      name: 'Onions & Garlic',
+      category: 'Fruit and vegetables',
+      priority: 'low',
+      reason: 'Kitchen staples that stretch every meal',
+      estimated_cost: 25,
+      is_healthyfood: false,
+    });
+  }
+
+  // Sort: high → medium → low
+  const rank = { high: 0, medium: 1, low: 2 };
+  items.sort((a, b) => rank[a.priority] - rank[b.priority]);
+
+  const total = items.reduce((s, i) => s + (i.estimated_cost || 0), 0);
+  const target = BUDGET_TARGET_BY_TIER[prefs.budget_tier] || BUDGET_TARGET_BY_TIER.medium;
+  const status = total < target * 0.9 ? 'under' : total > target * 1.1 ? 'over' : 'at';
+
+  const highCount = items.filter(i => i.priority === 'high').length;
+  const priority_note = highCount
+    ? `${highCount} item${highCount === 1 ? '' : 's'} in your pantry expire this week — buy fresh replacements first.`
+    : 'No urgent expiries — you can spread this shop out.';
+
+  return {
+    items,
+    total_cost: total,
+    budget_target: target,
+    budget_status: status,
+    priority_note,
+  };
+}
+
+app.get('/shopping-list/:customerId', (req, res) => {
+  try { res.json(computeShoppingList(resolveCid(req))); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ───────────────────────── Boot ─────────────────────────
 loadExcel();
 seedDemoUser();
