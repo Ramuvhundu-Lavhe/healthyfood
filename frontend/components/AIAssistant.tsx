@@ -18,8 +18,8 @@ const AIAssistant: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
-  // Initialize Gemini API
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY, vertexai: true });
+  const GEMINI_API_KEY = (import.meta as any).env?.VITE_GEMINI_API_KEY;
+  const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -43,6 +43,7 @@ const AIAssistant: React.FC = () => {
     setIsLoading(true);
 
     try {
+      if (!ai) throw new Error('Gemini API key not configured');
       const chat = ai.chats.create({
         model: 'gemini-2.5-flash',
         config: {
@@ -50,7 +51,6 @@ const AIAssistant: React.FC = () => {
         }
       });
 
-      // Send message
       const response = await chat.sendMessage({ message: userMsg.text });
       
       const modelMsg: Message = { 

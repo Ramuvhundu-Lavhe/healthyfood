@@ -6,12 +6,17 @@
   "description": "Node backend for proxying Google Cloud API requests",
   "main": "server.js",
   "scripts": {
-    "start": "node --env-file=.env.local server.js",
-    "dev": "nodemon --env-file=.env.local server.js",
+    "start": "node data-server.js",
+    "dev": "nodemon --env-file=.env.local data-server.js",
+    "proxy": "node --env-file=.env.local server.js",
     "data": "node --env-file=.env.local data-server.js",
     "data-dev": "nodemon --env-file=.env.local data-server.js"
   },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
+    "@google/genai": "^0.15.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",

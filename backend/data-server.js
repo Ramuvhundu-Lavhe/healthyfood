@@ -23,8 +23,7 @@ import { fileURLToPath } from 'url';
 import xlsx from 'xlsx';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { GoogleAuth } from 'google-auth-library';
-import fetch from 'node-fetch';
+import { GoogleGenAI } from '@google/genai';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -37,6 +36,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'gradhack-demo-secret-change-me';
 const GOOGLE_CLOUD_PROJECT = process.env.GOOGLE_CLOUD_PROJECT;
 const GOOGLE_CLOUD_LOCATION = process.env.GOOGLE_CLOUD_LOCATION || 'global';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const TX_FILE = process.env.TRANSACTIONS_FILE || path.join(__dirname, 'transactions.xlsx');
 
 // ───────────────────────── Health classification ─────────────────────────
@@ -429,27 +429,17 @@ function computeCommunity() {
   };
 }
 
-// ───────────────────────── Recipes via Gemini (Vertex) ─────────────────────────
-const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+// ───────────────────────── Recipes via Gemini (Google AI Studio) ─────────────────────────
+const genAI = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 
 async function callGemini(promptText) {
-  // Uses ADC (gcloud auth application-default login) — same creds as the proxy.
-  const region = GOOGLE_CLOUD_LOCATION === 'global' ? 'us-central1' : GOOGLE_CLOUD_LOCATION;
-  const url = `https://${region}-aiplatform.googleapis.com/v1/projects/${GOOGLE_CLOUD_PROJECT}/locations/${region}/publishers/google/models/${GEMINI_MODEL}:generateContent`;
-  const client = await auth.getClient();
-  const token = (await client.getAccessToken()).token;
-  const body = {
-    contents: [{ role: 'user', parts: [{ text: promptText }] }],
-    generationConfig: { responseMimeType: 'application/json', temperature: 0.6 },
-  };
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-Goog-User-Project': GOOGLE_CLOUD_PROJECT },
-    body: JSON.stringify(body),
+  if (!genAI) throw new Error('GEMINI_API_KEY not set — using fallback');
+  const response = await genAI.models.generateContent({
+    model: GEMINI_MODEL,
+    contents: promptText,
+    config: { responseMimeType: 'application/json', temperature: 0.6 },
   });
-  if (!r.ok) throw new Error(`Vertex ${r.status}`);
-  const data = await r.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const text = response.text || '';
   return JSON.parse(text.replace(/```json|```/g, '').trim());
 }
 
