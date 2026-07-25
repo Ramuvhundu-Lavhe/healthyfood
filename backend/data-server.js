@@ -36,7 +36,10 @@ const PORT = process.env.PORT || process.env.DATA_API_PORT || 5001;
 const JWT_SECRET = process.env.JWT_SECRET || 'gradhack-demo-secret-change-me';
 const GOOGLE_CLOUD_PROJECT = process.env.GOOGLE_CLOUD_PROJECT;
 const GOOGLE_CLOUD_LOCATION = process.env.GOOGLE_CLOUD_LOCATION || 'global';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+// gemini-2.5-flash was retired for new API keys — Google returned:
+//   "This model models/gemini-2.5-flash is no longer available to new users."
+// Defaulting to the moving 'latest' alias so we don't hit this again.
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const TX_FILE = process.env.TRANSACTIONS_FILE || path.join(__dirname, 'transactions.xlsx');
 
