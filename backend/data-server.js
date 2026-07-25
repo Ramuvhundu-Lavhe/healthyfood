@@ -131,6 +131,59 @@ const DB = {
   error: null,
 };
 
+// ───────────────────────── Food catalog ─────────────────────────
+// Built from the Excel product list so classification is data-driven.
+// The Discovery HealthyFood dataset already tags every SKU with the correct
+// Main category. We use that as the source of truth instead of hardcoded regex.
+const FOOD_CATALOG = new Map(); // key: lowercased product name → { category, section, is_healthy, is_healthyfood }
+const FOOD_TOKEN_INDEX = new Map(); // key: single-token lowercased → Array<{name, entry}> for substring lookup
+
+function registerFood(name, category, section) {
+  const key = String(name || '').toLowerCase().trim();
+  if (!key) return;
+  const entry = {
+    category,
+    section,
+    is_healthy: HEALTHY_CATEGORIES.has(category),
+    is_healthyfood: HEALTHY_CATEGORIES.has(category),
+  };
+  FOOD_CATALOG.set(key, entry);
+  // Index each meaningful token so partial matches work (e.g. "chicken" → "Chicken breast Rainbow")
+  const tokens = key.split(/\s+/).filter(t => t.length >= 3);
+  for (const t of tokens) {
+    if (!FOOD_TOKEN_INDEX.has(t)) FOOD_TOKEN_INDEX.set(t, []);
+    FOOD_TOKEN_INDEX.get(t).push({ name: key, entry });
+  }
+}
+
+/**
+ * Look up a food by name. Returns { category, is_healthy, is_healthyfood } or null.
+ * Matches: exact → substring in catalog → token overlap.
+ */
+function lookupFood(userInput) {
+  const q = String(userInput || '').toLowerCase().trim();
+  if (!q) return null;
+  // Exact
+  if (FOOD_CATALOG.has(q)) return FOOD_CATALOG.get(q);
+  // Substring: query contains a catalog product, or catalog product contains the query
+  for (const [name, entry] of FOOD_CATALOG.entries()) {
+    if (q.includes(name) || name.includes(q)) return entry;
+  }
+  // Token overlap — user typed a single common word like "chicken" or "rice"
+  const tokens = q.split(/\s+/).filter(t => t.length >= 3);
+  for (const t of tokens) {
+    if (FOOD_TOKEN_INDEX.has(t)) {
+      // Pick the entry whose product name is closest in length to what the user typed
+      const candidates = FOOD_TOKEN_INDEX.get(t);
+      const best = candidates.reduce((a, b) =>
+        Math.abs(a.name.length - q.length) < Math.abs(b.name.length - q.length) ? a : b
+      );
+      return best.entry;
+    }
+  }
+  return null;
+}
+
 function col(row, ...names) {
   // tolerant column lookup across slight header variations
   for (const n of names) {
@@ -185,6 +238,9 @@ function loadExcel() {
         is_healthy: HEALTHY_CATEGORIES.has(mainCat),
         is_healthyfood: HEALTHY_CATEGORIES.has(mainCat),
       });
+      // Register every SKU we've ever seen into the food catalog.
+      // This becomes the ground truth for pantry-add classification.
+      if (item && mainCat) registerFood(item, mainCat, subCat);
     }
 
     // finalise: turn basket maps into sorted arrays, default prefs
@@ -559,36 +615,84 @@ async function callGemini(promptText, opts = {}) {
   return JSON.parse(text.replace(/```json|```/g, '').trim());
 }
 
-// Classifies a raw pantry-item name into one of the HEALTHY_CATEGORIES
-// (or 'Unhealthy foods'). Falls back to a keyword rule if Gemini is unavailable.
-async function categorizePantryItem(name) {
-  const CATEGORIES = [
-    'Fruit and vegetables',
-    'Animal protein',
-    'Dairy',
-    'Whole grains and high-fibre starchy foods',
-    'Legumes',
-    'Oils, nuts and seeds',
-    'Unhealthy foods',
-  ];
-  // Rule-based first (fast + deterministic for well-known items)
-  const n = name.toLowerCase();
-  if (/chocolate|sweet|candy|chips|crisp|soda|cola|fizzy|ice cream|cookie|biscuit|rusks?|cake|pastry|sugar|syrup|jam/.test(n)) return 'Unhealthy foods';
-  if (/onion|garlic|tomato|spinach|carrot|pepper|fruit|vegetable|veg\b|salad|lettuce|cucumber|potato|apple|banana|orange|grape|berry|mango|avocado|leek|celery|broccoli|cauliflower|kale|beet|morogo|greens|sweet potato|pumpkin|butternut|beetroot|marrow|squash/.test(n)) return 'Fruit and vegetables';
-  if (/chicken|beef|fish|tuna|sardine|mince|steak|egg|ostrich|pork|lamb|mackerel|hake|snoek|prawn|pilchard|mince|salami|ham|bacon|sausage|biltong/.test(n)) return 'Animal protein';
-  if (/yogurt|yoghurt|milk|cheese|cream|amasi|maas|butter/.test(n)) return 'Dairy';
-  if (/samp|maize|couscous|rice|noodle|pasta|bulgar|buckwheat|oats?|bread|quinoa|barley|wheat|flour|cereal|muesli|granola|wrap|tortilla|roti/.test(n)) return 'Whole grains and high-fibre starchy foods';
-  if (/bean|lentil|chickpea|split pea|tofu|tempeh|seitan|edamame|hummus/.test(n)) return 'Legumes';
-  if (/oil|nut|seed|olive|almond|cashew|pecan|peanut|walnut|pistachio|macadamia|hazelnut|pumpkin seed|sunflower/.test(n)) return 'Oils, nuts and seeds';
-  // Fall back to Gemini if enabled — low temperature for deterministic classification
-  if (!genAI) return 'Fruit and vegetables';
-  try {
-    const out = await callGemini(`Classify this pantry item into exactly ONE of these South African HealthyFood categories: ${CATEGORIES.join(' | ')}. Item: "${name}". Return strict JSON: {"category": "..."}. No preamble.`, { temperature: 0.1 });
-    const cat = out?.category;
-    return CATEGORIES.includes(cat) ? cat : 'Fruit and vegetables';
-  } catch (_) {
-    return 'Fruit and vegetables';
+const HF_CATEGORIES = [
+  'Fruit and vegetables',
+  'Animal protein',
+  'Dairy',
+  'Whole grains and high-fibre starchy foods',
+  'Legumes',
+  'Oils, nuts and seeds',
+  'Unhealthy foods',
+];
+
+/**
+ * Classify a user-entered pantry item.
+ * Returns { category, is_healthy, source } OR throws if the input is not a food.
+ *
+ *  source:
+ *    'catalog'  → matched a real Discovery product from the Excel dataset
+ *    'rules'    → matched one of a short list of universally-recognised foods
+ *    'ai'       → Gemini classified it as food (with a category)
+ *
+ *  Throws { code: 'NOT_FOOD', message } when we can't recognise the input as
+ *  a food item at all — the pantry-add endpoint returns this as a 400 so the
+ *  UI can tell the user "Six gun isn't food" instead of quietly filing it
+ *  under 'Fruit and vegetables'.
+ */
+async function categorizePantryItem(rawName) {
+  const name = String(rawName || '').trim();
+  if (!name) throw Object.assign(new Error('name required'), { code: 'EMPTY' });
+
+  // 1. Excel catalog — the ground truth for what Discovery considers a food
+  const catalogHit = lookupFood(name);
+  if (catalogHit) {
+    return { category: catalogHit.category, is_healthy: catalogHit.is_healthy, source: 'catalog' };
   }
+
+  // 2. Small rules table for foods that MIGHT not appear in the Excel but are
+  //    universally recognised as food. Kept short on purpose — the catalog is
+  //    the primary source.
+  const n = name.toLowerCase();
+  const RULES = [
+    [/^(apple|banana|orange|grape|berry|mango|pear|peach|plum|melon|pineapple)/, 'Fruit and vegetables'],
+    [/^(onion|garlic|tomato|spinach|carrot|potato|pumpkin|butternut|broccoli|cauliflower|kale|morogo)/, 'Fruit and vegetables'],
+    [/^(chicken|beef|lamb|pork|fish|tuna|sardine|egg|ostrich|mince)/, 'Animal protein'],
+    [/^(milk|cheese|yog(h)?urt|amasi|maas|butter|cream)/, 'Dairy'],
+    [/^(rice|pasta|bread|oats|quinoa|couscous|samp|maize|noodle|bulgar|buckwheat)/, 'Whole grains and high-fibre starchy foods'],
+    [/^(lentil|chickpea|bean|tofu|tempeh|hummus)/, 'Legumes'],
+    [/^(oil|olive oil|nut|almond|cashew|peanut|walnut|seed|sunflower)/, 'Oils, nuts and seeds'],
+  ];
+  for (const [re, cat] of RULES) {
+    if (re.test(n)) return { category: cat, is_healthy: HEALTHY_CATEGORIES.has(cat), source: 'rules' };
+  }
+
+  // 3. Ask Gemini — strict prompt asks it to say "not food" if it's unsure.
+  if (genAI) {
+    try {
+      const out = await callGemini(
+        `You are classifying pantry input for a South African HealthyFood app.\n` +
+        `Item: "${name}"\n\n` +
+        `Rules:\n` +
+        `- If the item is NOT a food (e.g. cigarettes, cleaning products, brands like "Six Gun", medicine, alcohol), respond {"is_food": false, "reason": "<why>"}.\n` +
+        `- If it IS food, classify into ONE of: ${HF_CATEGORIES.join(' | ')}.\n` +
+        `- Respond {"is_food": true, "category": "<one of the above>"}. Nothing else.`,
+        { temperature: 0.1 }
+      );
+      if (out?.is_food === false) {
+        throw Object.assign(new Error(`"${name}" doesn't look like a food item${out.reason ? ' (' + out.reason + ')' : ''}. Add food items only.`), { code: 'NOT_FOOD' });
+      }
+      if (out?.category && HF_CATEGORIES.includes(out.category)) {
+        return { category: out.category, is_healthy: HEALTHY_CATEGORIES.has(out.category), source: 'ai' };
+      }
+    } catch (e) {
+      if (e.code === 'NOT_FOOD') throw e;
+      // fall through to non-food refusal
+    }
+  }
+
+  // 4. Everything failed → refuse rather than guess. Better to tell the user
+  //    "we don't recognise this" than silently mis-categorise cigarettes as fruit.
+  throw Object.assign(new Error(`We couldn't recognise "${name}" as a food item. Try a more common name (e.g. "chicken breast", "brown rice").`), { code: 'UNKNOWN' });
 }
 
 // Ingredients/terms strictly forbidden by each diet — used to filter Gemini output
@@ -623,6 +727,11 @@ async function generateRecipes(cid, query = {}) {
   const prefs = db.getPrefs(cid) || DB.prefs[cid] || defaultPrefs();
   const safePantry = pantry.filter(i => !i.allergen_conflict && !i.diet_conflict).map(i => i.name);
   const expiring = pantry.filter(i => i.days_until_expiry <= 3 && !i.allergen_conflict && !i.diet_conflict).map(i => i.name);
+
+  // Refuse to invent recipes for an empty pantry — recipes must be pantry-grounded.
+  if (safePantry.length === 0) {
+    throw Object.assign(new Error('empty pantry'), { code: 'EMPTY_PANTRY' });
+  }
 
   // Learning signal: recent cooks + explicit reviews
   const cooked = db.getCooked(cid).slice(0, 8).map(c => c.recipe_name);
@@ -864,17 +973,28 @@ app.post('/pantry/:customerId/add', async (req, res) => {
   const name = String(req.body?.name || '').trim();
   if (!name) return res.status(400).json({ error: 'name required' });
 
-  // Auto-categorize if not provided
   let category = req.body?.category;
+  let is_healthy = null;
   if (!category) {
-    try { category = await categorizePantryItem(name); }
-    catch (_) { category = 'Fruit and vegetables'; }
+    try {
+      const cls = await categorizePantryItem(name);
+      category = cls.category;
+      is_healthy = cls.is_healthy;
+    } catch (e) {
+      // Refuse to add non-food items rather than silently mis-categorising them.
+      return res.status(400).json({
+        error: e.message,
+        code: e.code || 'CLASSIFY_FAILED',
+        name,
+      });
+    }
   }
 
   db.addPantryItem(cid, {
     name,
     category,
     days_until_expiry: req.body?.days_until_expiry ?? 14,
+    is_healthy: is_healthy ?? HEALTHY_CATEGORIES.has(category),
   });
   res.json(computePantry(cid));
 });
@@ -885,15 +1005,16 @@ app.delete('/pantry/:customerId/item/:name', (req, res) => {
   res.json({ ok: true, removed, pantry: computePantry(cid) });
 });
 
-// Standalone category classifier — frontend can preview before adding
+// Standalone category classifier — frontend previews the category BEFORE the user
+// commits to adding. Returns 400 for non-food so the UI can warn early.
 app.post('/pantry/categorize', async (req, res) => {
   const name = String(req.body?.name || '').trim();
   if (!name) return res.status(400).json({ error: 'name required' });
   try {
-    const category = await categorizePantryItem(name);
-    res.json({ name, category });
+    const cls = await categorizePantryItem(name);
+    res.json({ name, category: cls.category, is_healthy: cls.is_healthy, source: cls.source });
   } catch (e) {
-    res.json({ name, category: 'Fruit and vegetables', note: 'fallback' });
+    res.status(400).json({ error: e.message, code: e.code || 'CLASSIFY_FAILED', name });
   }
 });
 
@@ -943,14 +1064,70 @@ app.get('/reviews/:customerId', (req, res) => {
   res.json({ reviews: db.getReviews(cid) });
 });
 
+// ───────────────────────── AI Chat ─────────────────────────
+// Route AIAssistant chat through here so the API key stays server-side and
+// the frontend gets a clear error state if AI is genuinely unavailable
+// (instead of silently falling back to hardcoded canned responses).
+app.post('/ai/chat', async (req, res) => {
+  const message = String(req.body?.message || '').trim();
+  if (!message) return res.status(400).json({ error: 'message required' });
+
+  const cid = resolveCid(req);
+  const prefs = db.getPrefs(cid) || DB.prefs[cid] || defaultPrefs();
+  const pantry = computePantry(cid).items.filter(i => !i.allergen_conflict && !i.diet_conflict);
+  const cooked = db.getCooked(cid).slice(0, 5).map(c => c.recipe_name);
+
+  if (!genAI) {
+    return res.status(503).json({
+      error: 'AI is unavailable — GEMINI_API_KEY not configured on the server.',
+      code: 'AI_UNAVAILABLE',
+    });
+  }
+
+  const systemContext =
+    `You are the Discovery HealthyFood Companion — a friendly, concise South-African nutrition assistant.\n` +
+    `User's real pantry: ${pantry.map(i => i.name).join(', ') || '(empty)'}\n` +
+    `User's diet: ${prefs.diet || 'none'}\n` +
+    `User's allergies: ${(prefs.allergies || []).join(', ') || 'none'}\n` +
+    `Household size: ${prefs.household_size || 1}, Budget tier: ${prefs.budget_tier || 'medium'}\n` +
+    `Recently cooked: ${cooked.join(', ') || 'nothing yet'}\n\n` +
+    `Rules:\n` +
+    `- Never recommend anything containing the user's allergens.\n` +
+    `- Respect their diet as a hard rule.\n` +
+    `- Keep replies to 2-4 short paragraphs.\n` +
+    `- Ground advice in what's actually in the pantry when relevant.\n` +
+    `- Use plain text, no markdown, no emoji.`;
+
+  try {
+    const response = await genAI.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: `${systemContext}\n\nUser question: ${message}\n\nYour reply:`,
+      config: { temperature: 0.7, topP: 0.95 },
+    });
+    const reply = (response.text || '').trim();
+    if (!reply) throw new Error('empty AI response');
+    res.json({ reply });
+  } catch (e) {
+    console.warn('[ai/chat] error:', e.message);
+    res.status(502).json({ error: 'AI request failed. Please try again.', code: 'AI_ERROR' });
+  }
+});
+
 app.get('/recipes/:customerId', async (req, res) => {
   const cid = resolveCid(req);
   try {
     const data = await generateRecipes(cid, req.query);
-    res.json(data);
+    return res.json(data);
   } catch (e) {
+    if (e.code === 'EMPTY_PANTRY') {
+      return res.json({
+        recipes: [],
+        empty_pantry: true,
+        message: 'Add items to your pantry to get recipe suggestions.',
+      });
+    }
     console.warn('[data-api] recipe AI fallback:', e.message);
-    res.json(fallbackRecipes(cid, req.query));
+    return res.json(fallbackRecipes(cid, req.query));
   }
 });
 
@@ -1277,6 +1454,8 @@ function fallbackRecipes(cid, query = {}) {
   const prefs = db.getPrefs(cid) || DB.prefs[cid] || defaultPrefs();
   const pantry = computePantry(cid).items.filter(i => !i.allergen_conflict && !i.diet_conflict);
   const names = pantry.map(i => i.name);
+  // Empty pantry → return nothing. Every recipe must come from what the user has.
+  if (names.length === 0) return { recipes: [], empty_pantry: true };
   const has = (kw) => names.find(n => n.toLowerCase().includes(kw));
   const userSearch = String(query.search || query.q || '').trim().toLowerCase();
 

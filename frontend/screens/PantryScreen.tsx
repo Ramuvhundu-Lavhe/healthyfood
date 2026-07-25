@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { getPantry, addPantryItem, categorizePantryItem } from '../api';
+import { getPantry, addPantryItem, categorizePantryItem, PantryClassifyError } from '../api';
 import { PantryItem } from '../types';
 import { useProfile } from '../context/ProfileContext';
-import { AlertTriangle, Plus, ChevronRight, Camera, RefreshCw, ShieldAlert, X, Search, CheckCircle, Tag } from 'lucide-react';
+import { AlertTriangle, Plus, ChevronRight, Camera, RefreshCw, ShieldAlert, X, Search, CheckCircle, Tag, AlertCircle } from 'lucide-react';
 
 interface PantryScreenProps {
   onNavigateToRecipes: () => void;
@@ -15,6 +15,7 @@ const PantryScreen: React.FC<PantryScreenProps> = ({ onNavigateToRecipes }) => {
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [manualInput, setManualInput] = useState('');
   const [previewCategory, setPreviewCategory] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const categorizeTimer = useRef<number | null>(null);
@@ -29,16 +30,24 @@ const PantryScreen: React.FC<PantryScreenProps> = ({ onNavigateToRecipes }) => {
     loadData();
   }, [profile]);
 
-  // Live-classify as the user types (debounced)
+  // Live-classify as the user types (debounced). Shows either a category
+  // preview OR an explicit "not a recognised food" warning — never guesses.
   useEffect(() => {
     if (categorizeTimer.current) window.clearTimeout(categorizeTimer.current);
     if (manualInput.trim().length < 3) {
       setPreviewCategory(null);
+      setPreviewError(null);
       return;
     }
     categorizeTimer.current = window.setTimeout(async () => {
       const res = await categorizePantryItem(manualInput.trim());
-      setPreviewCategory(res.category);
+      if (res.unknown) {
+        setPreviewCategory(null);
+        setPreviewError(res.reason || "This doesn't look like a food we recognise.");
+      } else {
+        setPreviewCategory(res.category);
+        setPreviewError(null);
+      }
     }, 400);
     return () => { if (categorizeTimer.current) window.clearTimeout(categorizeTimer.current); };
   }, [manualInput]);
@@ -56,14 +65,21 @@ const PantryScreen: React.FC<PantryScreenProps> = ({ onNavigateToRecipes }) => {
     if (!name || !profile || adding) return;
     setAdding(true);
     try {
+      // Only pass category if the backend classification succeeded — otherwise
+      // let the backend classifier run and reject non-food items.
       const data = await addPantryItem(profile.customer_id, name, previewCategory || undefined);
       setItems(data.items);
       setManualInput('');
       setPreviewCategory(null);
+      setPreviewError(null);
       setShowAddMenu(false);
       addToast(`${name} added to pantry`);
-    } catch (err) {
-      addToast('Could not add — please try again');
+    } catch (err: any) {
+      if (err instanceof PantryClassifyError) {
+        addToast(err.message);
+      } else {
+        addToast('Could not add — please try again');
+      }
     } finally {
       setAdding(false);
     }
@@ -224,17 +240,23 @@ const PantryScreen: React.FC<PantryScreenProps> = ({ onNavigateToRecipes }) => {
             />
             <button
               type="submit"
-              disabled={adding || !manualInput.trim()}
+              disabled={adding || !manualInput.trim() || !!previewError}
               className="bg-[var(--navy)] text-white px-4 py-2 rounded-lg font-bold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
             >
               {adding ? 'Adding...' : 'Add'}
             </button>
           </form>
-          {previewCategory && manualInput.trim() && (
+          {previewCategory && manualInput.trim() && !previewError && (
             <div className="flex items-center text-[11px] text-[var(--ink-muted)]">
               <Tag size={11} className="mr-1 text-[var(--teal)]" />
               Will be categorised as
               <span className="font-bold text-[var(--navy)] ml-1">{previewCategory}</span>
+            </div>
+          )}
+          {previewError && manualInput.trim() && (
+            <div className="flex items-start text-[11px] text-[var(--alert-red)] bg-[#FFE9E4] border border-[var(--alert-red)]/40 rounded-lg p-2">
+              <AlertCircle size={12} className="mr-1.5 mt-0.5 flex-shrink-0" />
+              <span>{previewError}</span>
             </div>
           )}
         </div>

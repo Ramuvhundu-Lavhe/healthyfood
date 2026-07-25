@@ -405,17 +405,45 @@ export const recordReview = async (customerId: string, recipe_name: string, rati
 };
 
 // ─────────────── Pantry additions ───────────────
+export class PantryClassifyError extends Error {
+  code: string;
+  constructor(message: string, code: string) { super(message); this.code = code; }
+}
+
 export const addPantryItem = async (customerId: string, name: string, category?: string): Promise<PantryResponse> => {
-  const response = await axios.post(toApiUrl(`/pantry/${customerId}/add`), { name, category });
-  return response.data;
+  try {
+    const response = await axios.post(toApiUrl(`/pantry/${customerId}/add`), { name, category });
+    return response.data;
+  } catch (e: any) {
+    // Backend refused (e.g. non-food). Surface the message so the UI can show it.
+    const data = e?.response?.data;
+    if (data?.error) throw new PantryClassifyError(data.error, data.code || 'ADD_FAILED');
+    throw e;
+  }
 };
 
-export const categorizePantryItem = async (name: string): Promise<{ name: string; category: string }> => {
+export const categorizePantryItem = async (name: string): Promise<{ name: string; category: string; unknown?: boolean; reason?: string }> => {
   try {
     const response = await axios.post(toApiUrl('/pantry/categorize'), { name });
     return response.data;
-  } catch {
-    return { name, category: 'Fruit and vegetables' };
+  } catch (e: any) {
+    // 400 from backend = non-food / unrecognised. Return an unknown marker instead of guessing.
+    const data = e?.response?.data;
+    if (data?.error) return { name, category: '', unknown: true, reason: data.error };
+    return { name, category: '', unknown: true };
+  }
+};
+
+export const chatWithAI = async (message: string): Promise<{ reply?: string; error?: string; code?: string }> => {
+  try {
+    const response = await axios.post(toApiUrl('/ai/chat'), { message });
+    return response.data;
+  } catch (e: any) {
+    const data = e?.response?.data;
+    return {
+      error: data?.error || 'AI is unavailable right now — please try again in a moment.',
+      code: data?.code || 'AI_ERROR',
+    };
   }
 };
 

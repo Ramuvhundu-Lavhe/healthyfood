@@ -1,9 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { GoogleGenAI } from '@google/genai';
 import { MessageSquare, X, Send, Bot, User, Sparkles, Clock, Users, CheckCircle, ShoppingCart, ChefHat, Flame, ThumbsUp, ThumbsDown, Check, Heart, AlertCircle } from 'lucide-react';
 import { useProfile } from '../context/ProfileContext';
 import { Recipe } from '../types';
-import { getRecipes, recordCooked, recordReview, saveRecipe, unsaveRecipe, getSavedRecipes, getPantry } from '../api';
+import { getRecipes, recordCooked, recordReview, saveRecipe, unsaveRecipe, getSavedRecipes, getPantry, chatWithAI } from '../api';
 
 // Bi-directional substring match — handles brand names vs generic pantry items
 function ingredientInPantry(ingName: string, pantryNames: string[]): boolean {
@@ -244,9 +243,6 @@ const AIAssistant: React.FC = () => {
     });
   };
 
-  const GEMINI_API_KEY = (import.meta as any).env?.VITE_GEMINI_API_KEY;
-  const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
-
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -268,15 +264,20 @@ const AIAssistant: React.FC = () => {
     setInput('');
     setIsLoading(true);
 
-    // Route 1: recipe intent → hit /recipes with the user's query
-    // This uses their REAL pantry and returns "missing items" to buy.
+    // Route 1: recipe intent → hit /recipes with the user's query.
+    // Returns a pantry-grounded recipe list, or an empty-pantry message.
     if (isRecipeIntent(userMsg.text) && profile) {
       try {
-        const data = await getRecipes(profile.customer_id, { search: userMsg.text });
+        const data: any = await getRecipes(profile.customer_id, { search: userMsg.text });
         const recipes = (data?.recipes || []).slice(0, 2);
-        const introText = recipes.length
-          ? `Here's what I'd cook from your pantry for "${userMsg.text}":`
-          : "I couldn't build a recipe for that from your current pantry. Try something like \"quick dinner\" or \"chicken bowl\".";
+        let introText: string;
+        if (data?.empty_pantry) {
+          introText = "Your pantry is empty — add a few items to the Pantry tab and I'll build recipes from what you have.";
+        } else if (recipes.length) {
+          introText = `Here's what I'd cook from your pantry for "${userMsg.text}":`;
+        } else {
+          introText = "I couldn't build a recipe for that from your current pantry. Try adding more items or ask a broader question.";
+        }
         setMessages(prev => [...prev, {
           id: (Date.now() + 1).toString(),
           role: 'model',
@@ -287,7 +288,7 @@ const AIAssistant: React.FC = () => {
         setMessages(prev => [...prev, {
           id: (Date.now() + 1).toString(),
           role: 'model',
-          text: "Recipe service is unreachable right now — but check the Recipes tab for suggestions from your pantry.",
+          text: "The recipe service is unreachable right now — try again shortly.",
         }]);
       } finally {
         setIsLoading(false);
@@ -295,48 +296,23 @@ const AIAssistant: React.FC = () => {
       return;
     }
 
-    // Route 2: general nutrition Q&A → Gemini chat
+    // Route 2: general nutrition Q&A → backend /ai/chat (server-side Gemini).
+    // No client-side hardcoded fallback — if AI is genuinely down we say so.
     try {
-      if (!ai) throw new Error('Gemini API key not configured');
-      const chat = ai.chats.create({
-        model: 'gemini-2.5-flash',
-        config: {
-          systemInstruction: 'You are the Discovery HealthyFood Companion AI. Answer questions about nutrition, cooking techniques, and healthy eating. Keep answers concise, friendly, and aligned with Discovery Vitality focus on whole foods, lean proteins, and reducing sugar/salt. Format with short paragraphs.',
-        }
-      });
-
-      const response = await chat.sendMessage({ message: userMsg.text });
-
-      const modelMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'model',
-        text: response.text || "I'm sorry, I couldn't process that."
-      };
-
-      setMessages(prev => [...prev, modelMsg]);
-    } catch (error) {
-      console.error("AI Chat Error:", error);
-      const q = userMsg.text.toLowerCase();
-      let fallback =
-        "Based on your pantry, a great choice is a Sardine & Veg Stir-fry with Buckwheat — high in omega-3s, ready in 15 minutes, and it uses your items that are expiring soon.";
-      if (q.includes('sugar') || q.includes('diabet'))
-        fallback = "To lower sugar, swap sugary drinks for water with lemon, and choose whole fruit over fruit juice. Your buckwheat and samp are excellent low-GI carbohydrates for steady energy.";
-      else if (q.includes('salt') || q.includes('sodium') || q.includes('pressure') || q.includes('hypertension'))
-        fallback = "For lower salt, cook with herbs, garlic and lemon instead of stock cubes, and rinse tinned beans before use. Your fresh vegetables and olive oil are naturally low in sodium.";
-      else if (q.includes('protein') || q.includes('build') || q.includes('muscle'))
-        fallback = "For more protein on a budget, your sardines and samp-and-beans are ideal — beans and grains together form a complete protein. Aim to include a protein source in every meal.";
-      else if (q.includes('budget') || q.includes('cheap') || q.includes('afford') || q.includes('save'))
-        fallback = "To eat well for less, cook in batches from staples you already own — samp, beans, tinned tomatoes and buckwheat stretch a long way.";
-      else if (q.includes('heritage') || q.includes('umngqusho') || q.includes('traditional'))
-        fallback = "Umngqusho — traditional samp and beans — is a wonderful heritage dish and a complete plant protein. You already have the samp and beans in your pantry.";
-      else if (q.includes('expir') || q.includes('waste') || q.includes('going off'))
-        fallback = "Your fresh vegetables and sardines are expiring soon — a Sardine & Veg Stir-fry uses both today, so nothing goes to waste.";
-
-      setMessages(prev => [...prev, {
-        id: (Date.now() + 1).toString(),
-        role: 'model',
-        text: fallback
-      }]);
+      const res = await chatWithAI(userMsg.text);
+      if (res.reply) {
+        setMessages(prev => [...prev, {
+          id: (Date.now() + 1).toString(),
+          role: 'model',
+          text: res.reply!,
+        }]);
+      } else {
+        setMessages(prev => [...prev, {
+          id: (Date.now() + 1).toString(),
+          role: 'model',
+          text: res.error || "The AI assistant is unavailable right now. Please try again shortly.",
+        }]);
+      }
     } finally {
       setIsLoading(false);
     }

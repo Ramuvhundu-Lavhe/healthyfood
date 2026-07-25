@@ -53,6 +53,7 @@ const SkeletonRecipeCard: React.FC = () => (
 const RecipesScreen: React.FC = () => {
   const { profile, addToast, openAI } = useProfile();
   const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [emptyPantry, setEmptyPantry] = useState(false);
   const [savedRecipes, setSavedRecipes] = useState<Recipe[]>([]);
   const [savedNames, setSavedNames] = useState<Set<string>>(new Set());
   const [pantryNames, setPantryNames] = useState<string[]>([]);
@@ -94,7 +95,7 @@ const RecipesScreen: React.FC = () => {
     const statusTimer2 = setTimeout(() => setAgentStatus("Matching dish photos..."), 1200);
 
     try {
-      const data = await getRecipes(profile.customer_id, {
+      const data: any = await getRecipes(profile.customer_id, {
         power: powerOn,
         goal,
         event,
@@ -102,8 +103,9 @@ const RecipesScreen: React.FC = () => {
         search: effectiveSearch,
         refresh: force ? Date.now() : undefined,
       });
-      cacheRef.current.set(cacheKey, data.recipes);
-      setRecipes(data.recipes);
+      cacheRef.current.set(cacheKey, data.recipes || []);
+      setRecipes(data.recipes || []);
+      setEmptyPantry(!!data.empty_pantry);
       if (searchPrompt !== undefined) setActiveSearchTerm(searchPrompt);
     } catch (e) {
       console.error(e);
@@ -348,8 +350,14 @@ const RecipesScreen: React.FC = () => {
               <>
                 <Heart size={32} className="mx-auto text-[var(--line)] mb-2" />
                 <p className="font-bold text-[var(--ink)]">No saved recipes yet</p>
-                <p className="text-sm mt-1">Tap the ♥ on any recipe to save it here.</p>
+                <p className="text-sm mt-1">Tap the heart on any recipe to save it here.</p>
                 <button onClick={() => setViewingSaved(false)} className="text-[var(--teal)] font-bold mt-3 underline">Browse recipes</button>
+              </>
+            ) : emptyPantry ? (
+              <>
+                <ShoppingBasket size={32} className="mx-auto text-[var(--line)] mb-2" />
+                <p className="font-bold text-[var(--ink)]">Your pantry is empty</p>
+                <p className="text-sm mt-1 max-w-xs mx-auto">Recipes are built from what you have. Add a few items to the Pantry tab first.</p>
               </>
             ) : (
               <>
