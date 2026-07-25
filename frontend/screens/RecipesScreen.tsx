@@ -14,50 +14,28 @@ function ingredientInPantry(ingName: string, pantryNames: string[]): boolean {
   });
 }
 
-// Custom Dropdown Component for a seamless look
-const CustomDropdown = ({ value, options, onChange, icon: Icon, labelPrefix = "" }: any) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const selectedOption = options.find((o: any) => o.value === value);
-
-  return (
-    <div className="relative flex-shrink-0" ref={dropdownRef}>
-      <button 
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center bg-[var(--bg)] border border-[var(--line)] text-[var(--ink)] px-3 py-1.5 rounded-full text-xs font-bold hover:border-[var(--teal)] transition-colors"
-      >
-        {Icon && <Icon size={14} className="text-[var(--ink-muted)] mr-1.5" />}
-        {labelPrefix}{selectedOption?.label || value}
-        <ChevronDown size={12} className="ml-1.5 text-[var(--ink-muted)]" />
-      </button>
-      
-      {isOpen && (
-        <div className="absolute top-full left-0 mt-1 w-40 bg-white border border-[var(--line)] rounded-xl shadow-lg z-50 py-1 animate-fade-in">
-          {options.map((opt: any) => (
-            <button
-              key={opt.value}
-              onClick={() => { onChange(opt.value); setIsOpen(false); }}
-              className={`w-full text-left px-4 py-2 text-xs font-bold hover:bg-[var(--bg)] transition-colors ${value === opt.value ? 'text-[var(--teal)]' : 'text-[var(--ink)]'}`}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
+// Native-select dropdown styled to match the pill chips. Native selects avoid
+// the overflow-clip bug the custom dropdown had inside the horizontal scroller,
+// and give us free keyboard + mobile-picker support.
+const CustomDropdown = ({ value, options, onChange, icon: Icon, labelPrefix = "" }: any) => (
+  <div className="relative flex-shrink-0">
+    {Icon && (
+      <Icon size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--ink-muted)] pointer-events-none" />
+    )}
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className={`appearance-none bg-[var(--bg)] border border-[var(--line)] text-[var(--ink)] py-1.5 rounded-full text-xs font-bold hover:border-[var(--teal)] focus:border-[var(--teal)] outline-none transition-colors cursor-pointer ${Icon ? 'pl-8' : 'pl-3'} pr-7`}
+    >
+      {options.map((opt: any) => (
+        <option key={opt.value} value={opt.value}>
+          {labelPrefix}{opt.label}
+        </option>
+      ))}
+    </select>
+    <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--ink-muted)] pointer-events-none" />
+  </div>
+);
 
 const RecipesScreen: React.FC = () => {
   const { profile, addToast, openAI } = useProfile();

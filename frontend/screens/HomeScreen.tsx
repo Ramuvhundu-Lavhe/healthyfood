@@ -3,14 +3,14 @@ import { HeritageResponse } from '../types';
 import { getHeritage } from '../api';
 import { useProfile } from '../context/ProfileContext';
 import CircularProgress from '../components/CircularProgress';
-import { CheckCircle, Lock, ArrowUp, Sparkles, X, Heart, ChevronRight } from 'lucide-react';
+import { CheckCircle, Lock, ArrowUp, Sparkles, X, Heart, ChevronRight, MessageSquare, ShoppingCart, ShoppingBasket, ChefHat } from 'lucide-react';
 
 interface HomeScreenProps {
   onNavigate: (tab: string) => void;
 }
 
 const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
-  const { profile } = useProfile();
+  const { profile, openAI } = useProfile();
   const [heritage, setHeritage] = useState<HeritageResponse | null>(null);
   const [showHeritage, setShowHeritage] = useState(true);
 
@@ -23,7 +23,18 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
   if (!profile) return null;
 
   const earnedMilestone = profile.milestones.find(m => m.earned);
-  const lockedMilestone = profile.milestones.find(m => !m.earned);
+  // Pick the milestone the user is CLOSEST to earning (highest progress that's not yet earned)
+  const lockedMilestone = profile.milestones
+    .filter(m => !m.earned && m.progress_pct > 0)
+    .sort((a, b) => b.progress_pct - a.progress_pct)[0]
+    || profile.milestones.find(m => !m.earned);
+
+  const quickActions = [
+    { label: 'Ask AI',   icon: MessageSquare, onClick: () => openAI(''), color: 'var(--teal)' },
+    { label: 'Recipes',  icon: ChefHat,       onClick: () => onNavigate('recipes'), color: 'var(--navy)' },
+    { label: 'Pantry',   icon: ShoppingBasket,onClick: () => onNavigate('pantry'), color: 'var(--healthy-green)' },
+    { label: 'Shop',     icon: ShoppingCart,  onClick: () => onNavigate('shopping'), color: 'var(--gold)' },
+  ];
 
   return (
     <div className="pb-28">
@@ -53,6 +64,25 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
               +{profile.score_change} from last month
             </div>
           )}
+        </div>
+
+        {/* Quick Actions */}
+        <div className="grid grid-cols-4 gap-2">
+          {quickActions.map(action => {
+            const Icon = action.icon;
+            return (
+              <button
+                key={action.label}
+                onClick={action.onClick}
+                className="flex flex-col items-center bg-white rounded-2xl border border-[var(--line)] py-3 px-1 hover:border-[var(--teal)] transition-colors shadow-sm"
+              >
+                <div className="w-9 h-9 rounded-full flex items-center justify-center mb-1" style={{ backgroundColor: `${action.color}22`, color: action.color }}>
+                  <Icon size={18} />
+                </div>
+                <span className="text-[10px] font-bold text-[var(--ink)]">{action.label}</span>
+              </button>
+            );
+          })}
         </div>
 
         {/* AI Nudge Card */}

@@ -62,15 +62,59 @@ const SHELF_LIFE = {
   'Unhealthy foods': 30,
 };
 
-// Photo lookup by keyword or dynamic Pollinations AI image generator matching the exact recipe contents
-const PHOTO_FALLBACK = 'https://images.unsplash.com/photo-1490645935967-10de6ba17061?w=600&q=80';
+// Photo lookup — curated dish→Unsplash map first, then Pollinations as a last resort.
+// Curated URLs are stable and actually look like the dish, which the generator often doesn't.
+const PHOTO_FALLBACK = 'https://images.unsplash.com/photo-1490645935967-10de6ba17061?w=800&q=80';
+
+const DISH_PHOTO_MAP = [
+  // Meat/fish dishes
+  { match: /pizza/i,                url: 'https://images.unsplash.com/photo-1513104890138-7c749659a591?w=800&q=80' },
+  { match: /burger/i,               url: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800&q=80' },
+  { match: /curry/i,                url: 'https://images.unsplash.com/photo-1585937421612-70a008356fbe?w=800&q=80' },
+  { match: /stir[- ]?fry|skillet/i, url: 'https://images.unsplash.com/photo-1512058564366-18510be2db19?w=800&q=80' },
+  { match: /stew|pot(jie)?|potjiekos/i, url: 'https://images.unsplash.com/photo-1547592166-23ac45744acd?w=800&q=80' },
+  { match: /soup/i,                 url: 'https://images.unsplash.com/photo-1547592180-85f173990554?w=800&q=80' },
+  { match: /pasta|spaghetti|penne|noodle/i, url: 'https://images.unsplash.com/photo-1621996346565-e3dbc353d2e5?w=800&q=80' },
+  { match: /roast|baked/i,          url: 'https://images.unsplash.com/photo-1544025162-d76694265947?w=800&q=80' },
+  { match: /grill(ed)?|braai/i,     url: 'https://images.unsplash.com/photo-1544025162-d76694265947?w=800&q=80' },
+  { match: /chicken/i,              url: 'https://images.unsplash.com/photo-1598103442097-8b74394b95c6?w=800&q=80' },
+  { match: /beef|steak|ostrich/i,   url: 'https://images.unsplash.com/photo-1546833999-b9f581a1996d?w=800&q=80' },
+  { match: /salmon|tuna/i,          url: 'https://images.unsplash.com/photo-1467003909585-2f8a72700288?w=800&q=80' },
+  { match: /sardine|pilchard/i,     url: 'https://images.unsplash.com/photo-1580476262798-bddd9f4b7369?w=800&q=80' },
+  { match: /fish|hake|snoek/i,      url: 'https://images.unsplash.com/photo-1519708227418-c8fd9a32b7a2?w=800&q=80' },
+  { match: /egg|omelette|frittata/i,url: 'https://images.unsplash.com/photo-1482049016688-2d3e1b311543?w=800&q=80' },
+  // Bowls / salads / wraps
+  { match: /bowl/i,                 url: 'https://images.unsplash.com/photo-1543353071-10c8ba85a904?w=800&q=80' },
+  { match: /salad/i,                url: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=800&q=80' },
+  { match: /wrap|burrito|taco/i,    url: 'https://images.unsplash.com/photo-1626082927389-6cd097cee6a6?w=800&q=80' },
+  { match: /sandwich|toast/i,       url: 'https://images.unsplash.com/photo-1528735602780-2552fd46c7af?w=800&q=80' },
+  // Breakfast
+  { match: /pancake|waffle/i,       url: 'https://images.unsplash.com/photo-1567620905732-2d1ec7ab7445?w=800&q=80' },
+  { match: /smoothie|shake/i,       url: 'https://images.unsplash.com/photo-1546039907-7fa05f864c02?w=800&q=80' },
+  { match: /oat|porridge|muesli/i,  url: 'https://images.unsplash.com/photo-1517686469429-8bdb88b9f907?w=800&q=80' },
+  { match: /breakfast/i,            url: 'https://images.unsplash.com/photo-1533089860892-a7c6f0a88666?w=800&q=80' },
+  // Legumes / grains / vegetarian
+  { match: /lentil|dal|dhal/i,      url: 'https://images.unsplash.com/photo-1585659722983-3a681d8f0c5f?w=800&q=80' },
+  { match: /bean|chickpea|hummus/i, url: 'https://images.unsplash.com/photo-1552862750-746b8fdae3f0?w=800&q=80' },
+  { match: /samp|umngqusho|mngqusho|maize|pap/i, url: 'https://images.unsplash.com/photo-1547496502-affa22d38842?w=800&q=80' },
+  { match: /rice|risotto/i,         url: 'https://images.unsplash.com/photo-1512058564366-18510be2db19?w=800&q=80' },
+  { match: /couscous|bulgar|quinoa|buckwheat/i, url: 'https://images.unsplash.com/photo-1543339308-43e59d6b73a6?w=800&q=80' },
+  { match: /vegetable|veggie|veg\b/i, url: 'https://images.unsplash.com/photo-1540420773420-3366772f4999?w=800&q=80' },
+  { match: /morogo|spinach|greens/i, url: 'https://images.unsplash.com/photo-1576045057995-568f588f82fb?w=800&q=80' },
+  { match: /tofu|tempeh/i,          url: 'https://images.unsplash.com/photo-1546069901-d5bfd2cbfb1f?w=800&q=80' },
+  // Fruit / snack
+  { match: /fruit|apple|banana|berry/i, url: 'https://images.unsplash.com/photo-1619566636858-adf3ef46400b?w=800&q=80' },
+];
 
 export function photoForRecipe(name = '', ingredients = []) {
   const ingNames = Array.isArray(ingredients)
-    ? ingredients.map(i => typeof i === 'string' ? i : (i?.name || '')).filter(Boolean).join(', ')
+    ? ingredients.map(i => typeof i === 'string' ? i : (i?.name || '')).filter(Boolean).join(' ')
     : '';
-  const prompt = `A freshly cooked gourmet plate of ${name}${ingNames ? ' featuring ' + ingNames : ''}, realistic food photography, cinematic lighting, appetizing presentation, 8k resolution`;
-  return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=800&height=500&nologo=true`;
+  const searchText = `${name} ${ingNames}`;
+  for (const entry of DISH_PHOTO_MAP) {
+    if (entry.match.test(searchText)) return entry.url;
+  }
+  return PHOTO_FALLBACK;
 }
 
 function photoFor(name = '') {
@@ -264,7 +308,7 @@ function computeProfile(cid) {
     healthy_ratio,
     profile_completeness: Math.min(100, completeness),
     preferences: prefsSet,
-    milestones: buildMilestones(health_score, healthy_ratio),
+    milestones: buildMilestones(cid, health_score, healthy_ratio),
   };
 }
 
@@ -275,13 +319,60 @@ function buildNudge(name, score, trend, ratio) {
   return `Steady going, ${first}. You're holding a ${score} health score — a couple of smart swaps this week could push you into your next milestone.`;
 }
 
-function buildMilestones(score, ratio) {
+function buildMilestones(cid, score, ratio) {
+  const cooked = db.getCooked(cid);
+  const saved = db.getSaved(cid);
+  const prefs = db.getPrefs(cid) || defaultPrefs();
+  const cookedCount = cooked.length;
+  const savedCount = saved.length;
+  const uniqueRecipes = new Set(cooked.map(c => String(c.recipe_name || '').toLowerCase())).size;
+  const hasAllergies = (prefs.allergies || []).length > 0;
+  const hasDiet = prefs.diet && prefs.diet !== 'none';
+
+  const weekAgo = Date.now() - 7 * 86400 * 1000;
+  const cookedThisWeek = cooked.filter(c => c.cooked_at > weekAgo).length;
+
+  const monthAgo = Date.now() - 30 * 86400 * 1000;
+  const cookedThisMonth = cooked.filter(c => c.cooked_at > monthAgo).length;
+
+  const pct = (n, target) => Math.min(100, Math.round((n / target) * 100));
+
   return [
-    { id: 'm1', name: 'First Step', desc: 'Start your journey', earned: true, progress_pct: 100, points: 100 },
-    { id: 'm2', name: 'Consistent Shopper', desc: 'Shop healthy 3 weeks in a row', earned: score >= 60, progress_pct: Math.min(100, Math.round(score / 60 * 100)), points: 250 },
-    { id: 'm3', name: 'HealthyFood Hero', desc: 'Reach an 80% healthy basket', earned: score >= 80, progress_pct: Math.min(100, Math.round(score / 80 * 100)), points: 500 },
-    { id: 'm4', name: 'Pantry Pro', desc: 'Cook 5 meals from your pantry', earned: false, progress_pct: 60, points: 300 },
-    { id: 'm5', name: 'Zero Waste', desc: 'Use all expiring items in a week', earned: false, progress_pct: ratio > 75 ? 40 : 10, points: 200 },
+    // Foundation
+    { id: 'first-step',      name: 'First Step',            desc: 'Sign up and start your journey',
+      earned: true, progress_pct: 100, points: 100 },
+    { id: 'profile-set',     name: 'Profile Perfected',     desc: 'Set a dietary preference',
+      earned: hasDiet, progress_pct: hasDiet ? 100 : 0, points: 100 },
+    { id: 'allergen-safe',   name: 'Safety First',          desc: 'Register your allergies so we can protect you',
+      earned: hasAllergies, progress_pct: hasAllergies ? 100 : 50, points: 100 },
+
+    // Score-based
+    { id: 'consistent',      name: 'Consistent Shopper',    desc: 'Reach a 60+ health score',
+      earned: score >= 60, progress_pct: pct(score, 60), points: 250 },
+    { id: 'hero',            name: 'HealthyFood Hero',      desc: 'Hit an 80% healthy basket',
+      earned: score >= 80, progress_pct: pct(score, 80), points: 500 },
+
+    // Cook-based (uses real db data)
+    { id: 'pantry-pro',      name: 'Pantry Pro',            desc: 'Cook 5 meals from your pantry',
+      earned: cookedCount >= 5, progress_pct: pct(cookedCount, 5), points: 300 },
+    { id: 'weekly-cook',     name: 'Weekly Warrior',        desc: 'Cook 3+ meals this week',
+      earned: cookedThisWeek >= 3, progress_pct: pct(cookedThisWeek, 3), points: 200 },
+    { id: 'iron-chef',       name: 'Iron Chef',             desc: 'Cook 10 different recipes',
+      earned: uniqueRecipes >= 10, progress_pct: pct(uniqueRecipes, 10), points: 500 },
+    { id: 'diverse-diner',   name: 'Diverse Diner',         desc: 'Try 20+ recipes in a month',
+      earned: cookedThisMonth >= 20, progress_pct: pct(cookedThisMonth, 20), points: 400 },
+
+    // Save + explore
+    { id: 'recipe-collector',name: 'Recipe Collector',      desc: 'Save 10 recipes to your favourites',
+      earned: savedCount >= 10, progress_pct: pct(savedCount, 10), points: 200 },
+
+    // Waste + heritage
+    { id: 'zero-waste',      name: 'Zero Waste Hero',       desc: 'Use all expiring items in a week',
+      earned: false, progress_pct: ratio > 75 ? 40 : 10, points: 200 },
+    { id: 'heritage',        name: 'Heritage Cook',         desc: 'Cook a traditional heritage dish',
+      earned: cooked.some(c => /umngqusho|potjie|morogo|pap|samp|braai/i.test(c.recipe_name || '')),
+      progress_pct: cooked.some(c => /umngqusho|potjie|morogo|pap|samp|braai/i.test(c.recipe_name || '')) ? 100 : 0,
+      points: 300 },
   ];
 }
 
@@ -494,11 +585,38 @@ async function categorizePantryItem(name) {
   }
 }
 
+// Ingredients/terms strictly forbidden by each diet — used to filter Gemini output
+// AND to reject fallback recipes. Regexes are word-boundary based to avoid false positives
+// (e.g. "milk thistle" wouldn't be catastrophic on a vegan diet but the risk of a real
+// dairy leak outweighs a few false rejects).
+const DIET_FORBIDDEN = {
+  vegan:        /\b(chicken|beef|pork|lamb|mutton|ostrich|game|meat|bacon|ham|sausage|salami|fish|tuna|sardine|pilchard|snoek|mackerel|hake|salmon|prawn|shrimp|mussel|calamari|crab|lobster|anchovy|egg|milk|cheese|yog(h)?urt|cream|butter|whey|casein|gelatin|honey)\b/i,
+  vegetarian:   /\b(chicken|beef|pork|lamb|mutton|ostrich|game|meat|bacon|ham|sausage|salami|fish|tuna|sardine|pilchard|snoek|mackerel|hake|salmon|prawn|shrimp|mussel|calamari|crab|lobster|anchovy|gelatin)\b/i,
+  pescatarian:  /\b(chicken|beef|pork|lamb|mutton|ostrich|game|meat|bacon|ham|sausage|salami|gelatin)\b/i,
+  halal:        /\b(pork|bacon|ham|prosciutto|salami|pepperoni|lard|alcohol|wine|beer|rum|whisky|whiskey|vodka|liqueur|brandy|sake)\b/i,
+  banting:      /\b(bread|pasta|rice|maize|samp|couscous|noodle|potato|sugar|honey|banana|oats|cereal|flour|wheat)\b/i,
+  diabetic:     /\b(sugar|syrup|honey|dessert|candy|cake|cookie|biscuit|chocolate|soda|cola|fizzy)\b/i,
+};
+
+function dietCompatible(recipe, diet) {
+  if (!diet || diet === 'none' || diet === 'all') return true;
+  const forbidden = DIET_FORBIDDEN[String(diet).toLowerCase()];
+  if (!forbidden) return true;
+  // Check name, ingredients, steps — but not health_benefit (marketing copy)
+  const parts = [
+    recipe.name || '',
+    (recipe.ingredients || []).map(i => (typeof i === 'string' ? i : i.name)).join(' '),
+    (recipe.missing_items || []).map(i => (typeof i === 'string' ? i : i.name)).join(' '),
+    (recipe.steps || []).join(' '),
+  ].join(' ');
+  return !forbidden.test(parts);
+}
+
 async function generateRecipes(cid, query = {}) {
   const pantry = computePantry(cid).items;
   const prefs = db.getPrefs(cid) || DB.prefs[cid] || defaultPrefs();
   const safePantry = pantry.filter(i => !i.allergen_conflict && !i.diet_conflict).map(i => i.name);
-  const expiring = pantry.filter(i => i.days_until_expiry <= 3 && !i.allergen_conflict).map(i => i.name);
+  const expiring = pantry.filter(i => i.days_until_expiry <= 3 && !i.allergen_conflict && !i.diet_conflict).map(i => i.name);
 
   // Learning signal: recent cooks + explicit reviews
   const cooked = db.getCooked(cid).slice(0, 8).map(c => c.recipe_name);
@@ -513,12 +631,23 @@ Recent cooking history — recipes user has actually cooked (suggest similar sty
 Liked recipes (lean into these flavours/techniques): ${liked.join(', ') || 'none'}
 Disliked recipes (AVOID recipes similar to these): ${disliked.join(', ') || 'none'}` : '';
 
+  const dietRule = prefs.diet && prefs.diet !== 'none' && prefs.diet !== 'all'
+    ? `HARD DIETARY CONSTRAINT — the user follows a ${prefs.diet} diet. NEVER include or reference: ` + ({
+        vegan: 'meat, poultry, fish, seafood, eggs, dairy (milk, cheese, yoghurt, cream, butter), honey, gelatin.',
+        vegetarian: 'meat, poultry, fish, seafood, or gelatin.',
+        pescatarian: 'meat or poultry.',
+        halal: 'pork, bacon, ham, prosciutto, alcohol, wine, beer, spirits.',
+        banting: 'bread, pasta, rice, maize/samp/couscous, potatoes, sugar, honey, oats, wheat/flour.',
+        diabetic: 'added sugar, syrup, honey, sugary drinks, sweets/desserts/cakes/cookies.',
+      }[String(prefs.diet).toLowerCase()] || 'anything the user cannot eat.') + ' If a pantry item violates this diet, exclude it and pick alternatives.'
+    : '';
+
   const prompt = `You are the Discovery HealthyFood AI Agent & Recipe Search Assistant for South Africa.
 CRITICAL: You MUST construct recipes using the user's EXACT pantry inventory below:
 User Pantry Items: ${safePantry.join(', ')}
 Expiring Soon (MUST prioritize using these): ${expiring.join(', ') || 'none'}
 Household size: ${prefs.household_size}
-Diet preference: ${prefs.diet}
+${dietRule}
 Allergies to avoid completely (HARD RULE — never include or suggest these or foods that contain them): ${prefs.allergies.join(', ') || 'none'}
 Context: event=${query.event || 'none'}, goal=${query.goal || 'general'}, power=${query.power || 'on'}.
 ${historyBlock}
@@ -544,11 +673,14 @@ Return strict JSON format:
       "servings": ${prefs.household_size},
       "calories": 420,
       "budget_savings_rand": 45,
-      "steps": ["Step 1", "Step 2"]
+      "steps": ["Detailed step 1 with technique and timing", "Detailed step 2", "..."]
     }
   ]
 }
-Generate 6 diverse personalized recipes — vary cooking methods (bake, stir-fry, boil, no-cook, one-pot) and meal types (light, hearty, quick, slow) so the user has real choice. When the user's search names an ingredient (e.g. "chicken"), return several distinct dishes featuring that ingredient (soups, bowls, curries, salads, roasts). Only pantry ingredients (plus 1-2 common staples in missing_items if necessary). No preamble.`;
+Generate 6 diverse personalized recipes — vary cooking methods (bake, stir-fry, boil, no-cook, one-pot) and meal types (light, hearty, quick, slow) so the user has real choice. When the user's search names an ingredient (e.g. "chicken"), return several distinct dishes featuring that ingredient (soups, bowls, curries, salads, roasts).
+Only pantry ingredients (plus 1-2 common staples in missing_items if necessary).
+STEPS QUALITY: 5-8 steps per recipe. Each step is 1-2 sentences, includes specifics — heat level (medium / high), timing (e.g. "5 minutes until softened"), technique (stir, fold, baste), and visual cues (golden brown, aromatic, reduced by half). No vague steps like "cook until done". Start steps with an action verb.
+No preamble.`;
 
   const out = await callGemini(prompt);
   const dislikedLower = new Set(disliked.map(d => d.toLowerCase()));
@@ -559,6 +691,8 @@ Generate 6 diverse personalized recipes — vary cooking methods (bake, stir-fry
     // Hard allergen re-check on the AI output
     const text = JSON.stringify(r).toLowerCase();
     if (prefs.allergies.some(a => a && text.includes(a.toLowerCase()))) return false;
+    // Hard diet re-check — vegan users NEVER see meat/fish/dairy etc.
+    if (!dietCompatible(r, prefs.diet)) return false;
     // Exclude anything that matches a previously disliked recipe by name
     if (dislikedLower.has(String(r.name).toLowerCase())) return false;
     return true;
@@ -781,15 +915,39 @@ app.get('/recipes/:customerId', async (req, res) => {
 });
 
 function fallbackRecipes(cid, query = {}) {
-  const pantry = computePantry(cid).items.filter(i => !i.allergen_conflict);
+  const prefs = db.getPrefs(cid) || DB.prefs[cid] || defaultPrefs();
+  // Respect BOTH allergens and diet when choosing pantry basis
+  const pantry = computePantry(cid).items.filter(i => !i.allergen_conflict && !i.diet_conflict);
   const names = pantry.map(i => i.name);
   const has = (kw) => names.find(n => n.toLowerCase().includes(kw));
   const userSearch = (query.search || query.q || '').trim().toLowerCase();
 
   const recipes = [];
-  const protein = has('sardine') || has('fish') || has('ostrich') || has('egg') || has('chicken') || names[0] || 'Sardines';
-  const grain = has('buckwheat') || has('samp') || has('maize') || has('couscous') || has('noodle') || names[1] || 'Wholewheat Couscous';
-  const veg = has('vegetable') || has('tomato') || has('fruit') || names[2] || 'Fresh Vegetables';
+
+  // Diet-safe defaults — used when the pantry doesn't have a diet-appropriate item
+  const dietDefaults = {
+    vegan:       { protein: 'Lentils',   dairy: null,          egg: null },
+    vegetarian:  { protein: 'Lentils',   dairy: 'Yoghurt',     egg: 'Eggs' },
+    pescatarian: { protein: 'Sardines',  dairy: 'Yoghurt',     egg: 'Eggs' },
+    halal:       { protein: 'Chicken',   dairy: 'Yoghurt',     egg: 'Eggs' },
+    banting:     { protein: 'Chicken',   dairy: 'Cheese',      egg: 'Eggs' },
+    diabetic:    { protein: 'Chicken',   dairy: 'Yoghurt',     egg: 'Eggs' },
+    none:        { protein: 'Chicken',   dairy: 'Yoghurt',     egg: 'Eggs' },
+    all:         { protein: 'Chicken',   dairy: 'Yoghurt',     egg: 'Eggs' },
+  };
+  const dd = dietDefaults[String(prefs.diet || 'none').toLowerCase()] || dietDefaults.none;
+
+  // Pick a diet-appropriate protein from pantry, else fall back to a safe default
+  const isVegan = prefs.diet === 'vegan';
+  const isVeggie = isVegan || prefs.diet === 'vegetarian';
+  const protein = (
+    (!isVeggie && (has('sardine') || has('fish') || has('ostrich') || has('chicken'))) ||
+    (!isVegan && has('egg')) ||
+    has('bean') || has('lentil') || has('chickpea') ||
+    (isVeggie ? dd.protein : (names[0] || dd.protein))
+  );
+  const grain = has('buckwheat') || has('samp') || has('maize') || has('couscous') || has('noodle') || has('bulgar') || has('rice') || (prefs.diet === 'banting' ? 'Cauliflower' : (names[1] || 'Wholewheat Couscous'));
+  const veg = has('vegetable') || has('tomato') || has('fruit') || has('spinach') || (names[2] || 'Fresh Vegetables');
 
   if (userSearch.includes('soup') || userSearch.includes('stew') || userSearch.includes('warm')) {
     recipes.push(mkRecipe(`Pantry ${capitalize(userSearch)} with ${veg}`, ['⏳ Long cook', 35], [veg, grain, 'Tinned Tomatoes'], 'Immunity boosting warm meal using your pantry items.', true));
@@ -818,7 +976,8 @@ function fallbackRecipes(cid, query = {}) {
   }
 
   const wantedMax = userSearch ? 8 : 6;
-  return { recipes: recipes.slice(0, wantedMax) };
+  // Filter out anything that violates the user's diet
+  return { recipes: recipes.filter(r => dietCompatible(r, prefs.diet)).slice(0, wantedMax) };
 }
 
 function capitalize(s) {
@@ -827,27 +986,46 @@ function capitalize(s) {
 
 function mkRecipe(name, [method, mins], ingredientNames, benefit, expiring) {
   const ingredients = ingredientNames.map(n => ({ name: typeof n === 'string' ? n : n.name, amount: '1 portion' }));
+  const first = ingredients[0]?.name || 'main ingredient';
+  const second = ingredients[1]?.name || 'accompaniment';
+  const rest = ingredients.slice(2).map(i => i.name).join(', ') || 'remaining pantry items';
+  const isQuick = mins <= 15;
+  const isNoCook = /No[- ]cook/i.test(method);
+
+  const steps = isNoCook ? [
+    `Wash and roughly chop ${first} and ${second} into bite-sized pieces — about the size of a R2 coin.`,
+    `Combine the chopped ${first}, ${second} and ${rest} in a large mixing bowl.`,
+    `Drizzle with 1 tablespoon of olive oil and squeeze over half a lemon (or a splash of vinegar). Toss gently for even coverage.`,
+    `Season with sea salt, black pepper, and any fresh or dried herbs you have — build flavor a pinch at a time and taste.`,
+    `Let the mixture rest for 3-5 minutes so the flavors marry before serving.`,
+    `Plate up and finish with a final crack of pepper. Serves ${4}.`,
+  ] : [
+    `Prep your ingredients first: chop ${first} into even bite-sized pieces, slice ${second} thinly, and set the rest (${rest}) within arm's reach.`,
+    `Warm 1 tablespoon of oil in a heavy pan over medium heat until it shimmers — about 60 seconds.`,
+    `Add ${first} and cook for ${Math.max(4, Math.floor(mins / 4))} minutes, stirring occasionally, until it starts to color at the edges and smells fragrant.`,
+    `Stir in ${second} and the remaining ${rest}. Season with salt, pepper, and any spices you have (a teaspoon of paprika or curry powder lifts most pantry dishes).`,
+    `Add a splash of water or stock (about 100ml), cover, and simmer on low for ${isQuick ? Math.max(4, mins - 5) : Math.max(10, mins - 10)} minutes so the flavors deepen. Stir once halfway through.`,
+    `Taste and adjust seasoning — a squeeze of lemon at the end brightens everything. If it looks dry, add a splash more water; if too wet, uncover for the last 2 minutes.`,
+    `Rest off the heat for 2 minutes, then plate up and serve while warm. Serves ${4}.`,
+  ];
+
   return {
-    name, 
-    photo: photoForRecipe(name, ingredients), 
-    prep_time_category: `${mins} Min Meals`, 
+    name,
+    photo: photoForRecipe(name, ingredients),
+    prep_time_category: `${mins} Min Meals`,
     cook_time_minutes: mins,
-    cooking_method: method, 
-    diet_tags: ['halal', 'healthyfood'], 
-    all_in_pantry: true, 
+    cooking_method: method,
+    diet_tags: ['halal', 'healthyfood'],
+    all_in_pantry: true,
     missing_items: [],
     ingredients,
-    health_benefit: benefit, 
-    allergy_safe: true, 
-    uses_expiring: expiring, 
+    health_benefit: benefit,
+    allergy_safe: true,
+    uses_expiring: expiring,
     servings: 4,
-    calories: 380, 
+    calories: 380,
     budget_savings_rand: 35,
-    steps: [
-      `Gather your pantry ingredients: ${ingredients.map(i => i.name).join(', ')}.`,
-      `Prepare ingredients and cook according to method: ${method}.`,
-      `Season with salt, black pepper, and herbs to taste. Serve warm.`
-    ],
+    steps,
   };
 }
 

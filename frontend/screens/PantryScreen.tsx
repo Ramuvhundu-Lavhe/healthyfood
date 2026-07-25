@@ -126,6 +126,20 @@ const PantryScreen: React.FC<PantryScreenProps> = ({ onNavigateToRecipes }) => {
       </div>
 
       <div className="p-6 space-y-6">
+        {/* Coming-soon banner — flags to judges/users that receipt scan is on the roadmap */}
+        <div className="discovery-card bg-gradient-to-br from-[#E6F6FA] to-white border-[var(--teal)] flex items-center">
+          <div className="bg-[var(--teal)] p-3 rounded-full mr-4 flex-shrink-0">
+            <Camera size={22} className="text-white" />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center flex-wrap gap-2 mb-0.5">
+              <p className="font-bold text-[var(--navy)] text-sm">Scanning receipts — Coming soon</p>
+              <span className="text-[9px] font-bold bg-[var(--gold)] text-[var(--navy-deep)] px-1.5 py-0.5 rounded uppercase tracking-wider">Preview</span>
+            </div>
+            <p className="text-[11px] text-[var(--ink-muted)] leading-snug">Snap your till slip and we'll auto-import every item into the right pantry category.</p>
+          </div>
+        </div>
+
         {/* Expiring Soon Section */}
         {expiringSoon.length > 0 && (
           <div className="discovery-card border-[var(--amber)] bg-[#FFFDF5]">
@@ -212,11 +226,14 @@ const PantryScreen: React.FC<PantryScreenProps> = ({ onNavigateToRecipes }) => {
                 </div>
               </div>
 
-              <button onClick={handleScan} className="w-full discovery-card flex items-center p-4 hover:bg-[var(--bg)] transition-colors text-left">
-                <Camera size={24} className="text-[var(--navy)] mr-4" />
-                <div>
-                  <p className="font-bold text-[var(--ink)] text-sm">Scan a till slip</p>
-                  <p className="text-xs text-[var(--ink-muted)] mt-0.5">Take a photo of your receipt</p>
+              <button onClick={handleScan} className="w-full discovery-card flex items-center p-4 opacity-80 cursor-not-allowed text-left border-dashed border-[var(--teal)]">
+                <Camera size={24} className="text-[var(--teal)] mr-4" />
+                <div className="flex-1">
+                  <div className="flex items-center flex-wrap gap-2">
+                    <p className="font-bold text-[var(--ink)] text-sm">Scan a till slip</p>
+                    <span className="text-[9px] font-bold bg-[var(--gold)] text-[var(--navy-deep)] px-1.5 py-0.5 rounded uppercase tracking-wider">Coming soon</span>
+                  </div>
+                  <p className="text-xs text-[var(--ink-muted)] mt-0.5">Take a photo of your receipt to auto-import every item</p>
                 </div>
               </button>
 
