@@ -434,14 +434,20 @@ export const categorizePantryItem = async (name: string): Promise<{ name: string
   }
 };
 
-export const chatWithAI = async (message: string): Promise<{ reply?: string; error?: string; code?: string }> => {
+export interface ChatTurn { role: 'user' | 'model'; text: string; }
+
+export const chatWithAI = async (
+  message: string,
+  history: ChatTurn[] = []
+): Promise<{ reply?: string; error?: string; code?: string; detail?: string }> => {
   try {
-    const response = await axios.post(toApiUrl('/ai/chat'), { message });
+    const response = await axios.post(toApiUrl('/ai/chat'), { message, history });
     return response.data;
   } catch (e: any) {
     const data = e?.response?.data;
     return {
       error: data?.error || 'AI is unavailable right now — please try again in a moment.',
+      detail: data?.detail,
       code: data?.code || 'AI_ERROR',
     };
   }

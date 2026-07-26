@@ -1137,7 +1137,16 @@ app.post('/ai/chat', async (req, res) => {
   const cid = resolveCid(req);
   const prefs = db.getPrefs(cid) || DB.prefs[cid] || defaultPrefs();
   const pantry = computePantry(cid).items.filter(i => !i.allergen_conflict && !i.diet_conflict);
-  const cooked = db.getCooked(cid).slice(0, 5).map(c => c.recipe_name);
+  const cookedList = db.getCooked(cid).slice(0, 8).map(c => c.recipe_name);
+  const liked = db.getLikedRecipes(cid);
+  const disliked = db.getDislikedRecipes(cid);
+  const savedList = db.getSaved(cid).slice(0, 6).map(r => r.name);
+  const pantryAdds = db.getPantryAdditions(cid).slice(0, 6).map(i => i.name);
+
+  // Multi-turn context — client sends last N turns of the conversation so the
+  // AI can follow up (e.g. "what about a vegan alternative to what you just
+  // suggested?"). Bounded so the prompt doesn't blow up.
+  const history = Array.isArray(req.body?.history) ? req.body.history.slice(-6) : [];
 
   if (!genAI) {
     return res.status(503).json({
@@ -1147,31 +1156,49 @@ app.post('/ai/chat', async (req, res) => {
   }
 
   const systemContext =
-    `You are the Discovery HealthyFood Companion — a friendly, concise South-African nutrition assistant.\n` +
-    `User's real pantry: ${pantry.map(i => i.name).join(', ') || '(empty)'}\n` +
-    `User's diet: ${prefs.diet || 'none'}\n` +
-    `User's allergies: ${(prefs.allergies || []).join(', ') || 'none'}\n` +
-    `Household size: ${prefs.household_size || 1}, Budget tier: ${prefs.budget_tier || 'medium'}\n` +
-    `Recently cooked: ${cooked.join(', ') || 'nothing yet'}\n\n` +
-    `Rules:\n` +
-    `- Never recommend anything containing the user's allergens.\n` +
-    `- Respect their diet as a hard rule.\n` +
-    `- Keep replies to 2-4 short paragraphs.\n` +
-    `- Ground advice in what's actually in the pantry when relevant.\n` +
-    `- Use plain text, no markdown, no emoji.`;
+`You are the Discovery HealthyFood Companion — a friendly, concise South-African nutrition assistant.
+
+USER PROFILE
+- Diet: ${prefs.diet || 'none'}${prefs.diet && prefs.diet !== 'none' ? ' (HARD RULE — never recommend anything that violates this)' : ''}
+- Allergies: ${(prefs.allergies || []).join(', ') || 'none'}${(prefs.allergies || []).length ? ' (HARD RULE — never recommend anything containing these)' : ''}
+- Household size: ${prefs.household_size || 1}
+- Budget tier: ${prefs.budget_tier || 'medium'}
+- Load-shedding tolerant cooking: ${prefs.power_available ? 'no (has power)' : 'YES (prefer no-cook / quick options)'}
+
+CURRENT PANTRY (${pantry.length} items): ${pantry.map(i => i.name).join(', ') || '(empty)'}
+Items added manually recently: ${pantryAdds.join(', ') || 'none'}
+
+LEARNED PREFERENCES — use these to personalise
+- Recently cooked: ${cookedList.join(', ') || 'nothing yet'}
+- Liked: ${liked.join(', ') || 'none yet'}
+- Disliked: ${disliked.join(', ') || 'none yet'} (avoid recommending anything similar to these)
+- Saved for later: ${savedList.join(', ') || 'none yet'}
+
+BEHAVIOUR
+- If asked for an ALTERNATIVE to an ingredient or dish, always suggest one that (a) fits the diet, (b) contains no allergen, and (c) plays a similar role in the meal (protein for protein, grain for grain, etc.). Prefer alternatives already in the pantry.
+- If the user asks for a recipe, ground it in the current pantry when possible; if the pantry is empty, still give one but list every ingredient as a shopping item.
+- Reference the user's cooked/liked history when it's relevant ("since you enjoyed the samp bowl, you'd probably like...").
+- Be conversational — this is a chat. Ask a clarifying question if the request is ambiguous.
+- Keep replies to 2-4 short paragraphs. Plain text only, no markdown, no emoji.`;
+
+  const historyBlock = history.length
+    ? '\n\nPRIOR CONVERSATION (oldest first):\n' + history
+        .map(h => `${(h.role === 'user' ? 'User' : 'Assistant')}: ${String(h.text || '').slice(0, 500)}`)
+        .join('\n')
+    : '';
+
+  const prompt = `${systemContext}${historyBlock}\n\nUser: ${message}\n\nAssistant:`;
 
   try {
     const response = await genAI.models.generateContent({
       model: GEMINI_MODEL,
-      contents: `${systemContext}\n\nUser question: ${message}\n\nYour reply:`,
+      contents: prompt,
       config: { temperature: 0.7, topP: 0.95 },
     });
     const reply = (response.text || '').trim();
     if (!reply) throw new Error('empty AI response');
     res.json({ reply });
   } catch (e) {
-    // Log & surface the real reason so we can diagnose (model name wrong,
-    // key invalid, quota exceeded, etc.) without needing to SSH into the VM.
     const detail = e?.message || String(e);
     console.warn('[ai/chat] error:', detail);
     res.status(502).json({

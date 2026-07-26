@@ -253,30 +253,42 @@ const AIAssistant: React.FC = () => {
       if (aiInitialMessage) {
         setInput(aiInitialMessage);
       }
+      // Focus the input as soon as the modal opens so the user can start
+      // typing without having to tap the field first.
+      setTimeout(() => inputRef.current?.focus(), 250);
     }
   }, [messages, isAIOpen, aiInitialMessage]);
 
-  const handleSend = async () => {
-    if (!input.trim()) return;
+  const inputRef = useRef<HTMLInputElement>(null);
 
-    const userMsg: Message = { id: Date.now().toString(), role: 'user', text: input };
+  const handleSend = async (eOrText?: React.FormEvent | string) => {
+    if (typeof eOrText !== 'string' && eOrText && 'preventDefault' in eOrText) {
+      eOrText.preventDefault();
+    }
+    const text = typeof eOrText === 'string' ? eOrText : input;
+    const trimmed = text.trim();
+    if (!trimmed || isLoading) return;
+
+    const userMsg: Message = { id: Date.now().toString(), role: 'user', text: trimmed };
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setIsLoading(true);
+    // Refocus the input so the user can immediately type the next message
+    setTimeout(() => inputRef.current?.focus(), 0);
 
     // Route 1: recipe intent → hit /recipes with the user's query.
     // Returns a pantry-grounded recipe list, or an empty-pantry message.
-    if (isRecipeIntent(userMsg.text) && profile) {
+    if (isRecipeIntent(trimmed) && profile) {
       try {
-        const data: any = await getRecipes(profile.customer_id, { search: userMsg.text });
+        const data: any = await getRecipes(profile.customer_id, { search: trimmed });
         const recipes = (data?.recipes || []).slice(0, 2);
         let introText: string;
         if (data?.empty_pantry && recipes.length) {
-          introText = `Your pantry is empty — here's what you could make for "${userMsg.text}". Every ingredient below is on your shopping list.`;
+          introText = `Your pantry is empty — here's what you could make for "${trimmed}". Every ingredient below is on your shopping list.`;
         } else if (data?.empty_pantry) {
           introText = "Your pantry is empty. Add a few items to the Pantry tab and I'll tailor recipes to what you have.";
         } else if (recipes.length) {
-          introText = `Here's what I'd cook from your pantry for "${userMsg.text}":`;
+          introText = `Here's what I'd cook from your pantry for "${trimmed}":`;
         } else {
           introText = "I couldn't build a recipe for that. Try a simpler query or add more items to your pantry.";
         }
@@ -298,10 +310,15 @@ const AIAssistant: React.FC = () => {
       return;
     }
 
-    // Route 2: general nutrition Q&A → backend /ai/chat (server-side Gemini).
-    // No client-side hardcoded fallback — if AI is genuinely down we say so.
+    // Route 2: general Q&A → backend /ai/chat with multi-turn history.
+    // Send the last 6 turns of the conversation so the agent can follow up
+    // and remember what it just recommended when asked "what's an alternative?"
     try {
-      const res = await chatWithAI(userMsg.text);
+      const history = messages
+        .filter(m => !m.recipes || m.recipes.length === 0) // strip recipe cards from history
+        .slice(-6)
+        .map(m => ({ role: m.role, text: m.text }));
+      const res = await chatWithAI(trimmed, history);
       if (res.reply) {
         setMessages(prev => [...prev, {
           id: (Date.now() + 1).toString(),
@@ -385,26 +402,35 @@ const AIAssistant: React.FC = () => {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input Area */}
-          <div className="bg-white p-4 border-t border-[var(--line)] shadow-[0_-4px_12px_rgba(0,0,0,0.02)]">
-            <div className="flex items-center bg-[var(--bg)] border border-[var(--line)] rounded-full px-2 py-1 focus-within:border-[var(--teal)] transition-colors">
+          {/* Input area — real <form> so Enter and click both submit reliably */}
+          <form
+            onSubmit={handleSend}
+            className="bg-white p-4 border-t border-[var(--line)] shadow-[0_-4px_12px_rgba(0,0,0,0.02)]"
+          >
+            <div className="flex items-center bg-[var(--bg)] border-2 border-[var(--line)] rounded-full px-2 py-1 focus-within:border-[var(--teal)] transition-colors">
               <input
+                ref={inputRef}
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                placeholder="Ask for a recipe or diet tip..."
-                className="flex-1 bg-transparent px-3 py-2 text-sm outline-none text-[var(--ink)]"
+                placeholder={isLoading ? 'Thinking…' : 'Ask for a recipe, diet tip, or alternative…'}
+                enterKeyHint="send"
+                autoComplete="off"
+                autoCapitalize="sentences"
+                spellCheck
+                disabled={isLoading}
+                className="flex-1 bg-transparent px-3 py-2 text-sm outline-none text-[var(--ink)] placeholder:text-[var(--ink-muted)] disabled:opacity-70"
               />
               <button
-                onClick={handleSend}
+                type="submit"
                 disabled={!input.trim() || isLoading}
-                className="bg-[var(--teal)] text-white p-2 rounded-full disabled:opacity-50 transition-opacity"
+                aria-label="Send message"
+                className="bg-[var(--teal)] hover:bg-[#0092A6] text-white p-2 rounded-full disabled:opacity-40 disabled:cursor-not-allowed transition-opacity flex-shrink-0"
               >
                 <Send size={16} />
               </button>
             </div>
-          </div>
+          </form>
         </div>
       )}
     </>
