@@ -77,9 +77,13 @@ const Shell: React.FC = () => {
   ) : <AuthGate />;
 };
 
+// Responsive app frame:
+//   Phone (<768px):  constrained 480px width, phone-in-frame look with shadow
+//   Tablet (≥768px): fills viewport up to 768px, no shadow, immersive
+//   Desktop (≥1024px): fills viewport up to 1152px
 const App: React.FC = () => {
   return (
-    <div className="max-w-[480px] mx-auto h-[100dvh] bg-[var(--bg)] relative shadow-2xl flex flex-col overflow-hidden text-[var(--ink)] font-sans">
+    <div className="mx-auto h-[100dvh] bg-[var(--bg)] relative flex flex-col overflow-hidden text-[var(--ink)] font-sans max-w-[480px] shadow-2xl md:max-w-3xl md:shadow-none lg:max-w-6xl">
       <AuthProvider>
         <Shell />
       </AuthProvider>

@@ -18,23 +18,26 @@ const BottomNav: React.FC<BottomNavProps> = ({ activeTab, onChangeTab }) => {
   ];
 
   return (
-    <div className="absolute bottom-0 w-full bg-[var(--navy)] flex justify-around items-center h-[76px] pb-4 px-1 z-50 shadow-[0_-4px_20px_rgba(0,47,108,0.15)]">
-      {tabs.map((tab) => {
-        const Icon = tab.icon;
-        const isActive = activeTab === tab.id;
-        return (
-          <button
-            key={tab.id}
-            onClick={() => onChangeTab(tab.id)}
-            className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${
-              isActive ? 'text-[var(--teal)]' : 'text-[var(--navy-tint)] opacity-70'
-            }`}
-          >
-            <Icon size={22} strokeWidth={isActive ? 2.5 : 2} />
-            <span className="text-[9px] font-medium">{tab.label}</span>
-          </button>
-        );
-      })}
+    <div className="absolute bottom-0 w-full bg-[var(--navy)] h-[76px] pb-4 z-50 shadow-[0_-4px_20px_rgba(0,47,108,0.15)]">
+      {/* Cap inner width on tablet+ so tabs don't stretch across a huge desktop viewport */}
+      <div className="h-full max-w-3xl mx-auto flex justify-around items-center px-1 md:px-6">
+        {tabs.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => onChangeTab(tab.id)}
+              className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${
+                isActive ? 'text-[var(--teal)]' : 'text-[var(--navy-tint)] opacity-70'
+              }`}
+            >
+              <Icon size={22} strokeWidth={isActive ? 2.5 : 2} />
+              <span className="text-[9px] font-medium md:text-[11px]">{tab.label}</span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 };

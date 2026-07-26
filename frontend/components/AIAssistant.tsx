@@ -347,9 +347,10 @@ const AIAssistant: React.FC = () => {
         <Sparkles size={24} />
       </button>
 
-      {/* Chat Modal */}
+      {/* Chat Modal — phone: fullscreen slide-up; tablet+: right-docked panel */}
       {isAIOpen && (
-        <div className="absolute inset-0 z-50 flex flex-col bg-[var(--bg)] animate-slide-up">
+        <div className="absolute inset-0 z-50 flex flex-col bg-[var(--bg)] animate-slide-up
+                        md:inset-auto md:top-4 md:bottom-24 md:right-4 md:w-[420px] md:rounded-2xl md:shadow-2xl md:border md:border-[var(--line)] md:overflow-hidden">
           {/* Header */}
           <div className="bg-[var(--navy)] text-white px-4 py-4 flex items-center justify-between shadow-md">
             <div className="flex items-center">

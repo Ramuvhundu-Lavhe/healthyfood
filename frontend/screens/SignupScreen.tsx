@@ -82,7 +82,8 @@ const SignupScreen: React.FC<SignupScreenProps> = ({ onSwitchToLogin }) => {
         <p className="text-[var(--navy-tint)] mt-1 text-sm">Tell us how you eat — we'll never suggest anything unsafe.</p>
       </div>
 
-      <div className="flex-1 bg-[var(--bg)] rounded-t-3xl px-6 pt-6 pb-10 overflow-y-auto">
+      <div className="flex-1 bg-[var(--bg)] rounded-t-3xl px-6 pt-6 pb-10 overflow-y-auto md:px-8">
+        <div className="w-full md:max-w-lg md:mx-auto">
         <form onSubmit={handleSubmit} className="space-y-5">
           {/* Account */}
           <div>
@@ -227,6 +228,7 @@ const SignupScreen: React.FC<SignupScreenProps> = ({ onSwitchToLogin }) => {
         <div className="mt-6 text-center text-sm text-[var(--ink-muted)]">
           Already have an account?{' '}
           <button onClick={onSwitchToLogin} className="text-[var(--teal)] font-bold">Log in</button>
+        </div>
         </div>
       </div>
     </div>

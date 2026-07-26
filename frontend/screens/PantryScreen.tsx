@@ -163,7 +163,7 @@ const PantryScreen: React.FC<PantryScreenProps> = ({ onNavigateToRecipes }) => {
               <AlertTriangle size={20} className="mr-2" />
               Expiring this week
             </div>
-            <div className="space-y-3 mb-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-5">
               {expiringSoon.map((item, idx) => (
                 <div key={idx} className="flex justify-between items-center bg-white p-3 rounded-lg border border-[var(--line)]">
                   <div className="flex items-center">
@@ -197,7 +197,7 @@ const PantryScreen: React.FC<PantryScreenProps> = ({ onNavigateToRecipes }) => {
             <h2 className="text-lg font-bold text-[var(--navy)] flex items-center border-b border-[var(--line)] pb-2">
               {category}
             </h2>
-            <div className="space-y-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
               {categoryItems.map(renderItem)}
             </div>
           </div>

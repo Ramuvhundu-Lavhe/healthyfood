@@ -409,6 +409,8 @@ const RecipesScreen: React.FC = () => {
                   <Bot size={12} className="mr-1 text-[var(--teal)]" /> AI matched dish photos
                 </span>
               </h2>
+              {/* Cards stack on phone, 2-up on tablet, 3-up on desktop */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {categoryRecipes.map((recipe, idx) => (
                 <div key={idx} className="discovery-card overflow-hidden p-0 flex flex-col">
                   <div className="h-44 w-full relative bg-slate-100">
@@ -530,6 +532,7 @@ const RecipesScreen: React.FC = () => {
                   </div>
                 </div>
               ))}
+              </div>
             </div>
           ))
         )}

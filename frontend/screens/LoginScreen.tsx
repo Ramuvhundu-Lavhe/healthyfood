@@ -40,7 +40,8 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onSwitchToSignup }) => {
         <p className="text-[var(--navy-tint)] mt-1 text-sm">Your personal food companion</p>
       </div>
 
-      <div className="flex-1 bg-[var(--bg)] rounded-t-3xl px-6 pt-8 pb-10">
+      <div className="flex-1 bg-[var(--bg)] rounded-t-3xl px-6 pt-8 pb-10 md:px-8">
+        <div className="w-full md:max-w-md md:mx-auto">
         <h2 className="text-2xl font-bold text-[var(--ink)]">Welcome back</h2>
         <p className="text-[var(--ink-muted)] text-sm mt-1 mb-6">Log in to see your pantry, recipes and shopping list.</p>
 
@@ -92,6 +93,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onSwitchToSignup }) => {
         <div className="mt-8 bg-white rounded-xl border border-[var(--line)] p-3">
           <p className="text-[10px] font-bold text-[var(--ink-muted)] uppercase tracking-wide mb-1">Demo login</p>
           <p className="text-sm text-[var(--ink)]"><span className="font-bold">aisha</span> / <span className="font-bold">demo123</span> — full transaction history</p>
+        </div>
         </div>
       </div>
     </div>
